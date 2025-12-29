@@ -166,30 +166,33 @@ async def get_subscriptions(db: Session = Depends(get_db)):
 async def test_monitoring(db: Session = Depends(get_db)):
     """Test endpoint: Compare a mock old schema against live Stripe API"""
     
-    # Fetch REAL current Stripe schema
-    from app.services.stripe_crawler import StripeCrawler
-    crawler = StripeCrawler()
-    current_spec = await crawler.fetch_spec()
-    current_schema = current_spec.get("paths", {}).get("/v1/payment_intents", {}).get("post", {})
+    # Create a simple old schema
+    old_schema = {
+        "type": "object",
+        "properties": {
+            "amount": {"type": "integer", "description": "Amount in cents"},
+            "currency": {"type": "string", "description": "Three-letter ISO code"}
+        },
+        "required": ["amount", "currency"]
+    }
     
-    # Create a simplified "old" version by removing some fields
-    import copy
-    old_schema = copy.deepcopy(current_schema)
+    # Create a new schema with changes
+    new_schema = {
+        "type": "object",
+        "properties": {
+            "amount": {"type": "integer", "description": "Amount in cents"},
+            "currency": {"type": "string", "description": "Three-letter ISO code"},
+            "metadata": {"type": "object", "description": "Set of key-value pairs"},  # NEW
+            "description": {"type": "string", "description": "Description of payment"},  # NEW
+            "customer": {"type": "string", "description": "Customer ID"}  # NEW
+        },
+        "required": ["amount", "currency", "customer"]  # customer is now required
+    }
     
-    # Simulate changes: Remove some properties from the old schema
-    if "requestBody" in old_schema:
-        request_body = old_schema["requestBody"]["content"]["application/x-www-form-urlencoded"]["schema"]
-        properties = request_body.get("properties", {})
-        
-        # Remove a few fields to simulate they were "added" in the new version
-        fields_to_remove = ["metadata", "description", "statement_descriptor"]
-        for field in fields_to_remove:
-            properties.pop(field, None)
-    
-    # Run diff between old (modified) and current (real)
+    # Run diff
     from app.services.diff_engine import DiffEngine
     diff_engine = DiffEngine()
-    changes = diff_engine.compare_schemas(old_schema, current_schema)  # Removed the 3rd argument
+    changes = diff_engine.compare_schemas(old_schema, new_schema)
     
     # Analyze with AI
     from app.services.ai_analyzer import AIAnalyzer
@@ -202,12 +205,14 @@ async def test_monitoring(db: Session = Depends(get_db)):
             "change_type": change["change_type"],
             "field_path": change["field_path"],
             "severity": change["severity"],
+            "old_value": change.get("old_value"),
+            "new_value": change.get("new_value"),
             "ai_summary": summary
         })
     
     return {
         "status": "test_success",
-        "message": "Compared modified old schema vs live Stripe API",
+        "message": "Testing change detection with mock schemas",
         "changes_detected": len(changes),
         "changes": analyzed_changes
     }

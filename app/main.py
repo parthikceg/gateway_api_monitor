@@ -166,8 +166,7 @@ async def get_subscriptions(db: Session = Depends(get_db)):
 async def inject_test_snapshot(db: Session = Depends(get_db)):
     """Create a modified snapshot for testing change detection"""
     from app.models.models import Snapshot
-    import json
-    from datetime import datetime
+    import copy
     
     # Get the latest real snapshot
     latest = db.query(Snapshot).order_by(Snapshot.created_at.desc()).first()
@@ -175,46 +174,41 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
     if not latest:
         return {"error": "No snapshots found. Run /monitor/run first."}
     
-    # schema_data is already a dict, no need to parse
-    schema = latest.schema_data if isinstance(latest.schema_data, dict) else json.loads(latest.schema_data)
+    # Deep copy the schema
+    schema = copy.deepcopy(latest.schema_data)
     
-    # Make a deep copy to avoid modifying the original
-    import copy
-    schema = copy.deepcopy(schema)
+    # Properties are at ROOT level!
+    if "properties" in schema:
+        properties = schema["properties"]
+        
+        # Change 1: Add a new property
+        properties["new_test_field"] = {
+            "type": "string",
+            "description": "A new test field added for testing"
+        }
+        
+        # Change 2: Remove an existing property
+        properties.pop("metadata", None)
+        
+        # Change 3: Change a field type
+        if "amount" in properties:
+            properties["amount"]["type"] = "string"  # Changed from integer
+        
+        # Change 4: Add to required list (at root level)
+        if "required" in schema:
+            if "new_test_field" not in schema["required"]:
+                schema["required"].append("new_test_field")
+        
+        # Change 5: Modify a description
+        if "currency" in properties:
+            properties["currency"]["description"] = "MODIFIED: Three-letter ISO currency code"
     
-    # Modify the schema to simulate API changes
-    if "requestBody" in schema and "content" in schema["requestBody"]:
-        content = schema["requestBody"]["content"].get("application/x-www-form-urlencoded", {})
-        if "schema" in content and "properties" in content["schema"]:
-            properties = content["schema"]["properties"]
-            
-            # Change 1: Add a new property
-            properties["new_test_field"] = {
-                "type": "string",
-                "description": "A new test field added for testing"
-            }
-            
-            # Change 2: Remove an existing property
-            properties.pop("metadata", None)
-            
-            # Change 3: Change a field type
-            if "amount" in properties:
-                properties["amount"]["type"] = "string"  # Changed from integer
-            
-            # Change 4: Add a new required field
-            if "required" in content["schema"]:
-                content["schema"]["required"].append("new_test_field")
-            
-            # Change 5: Modify a description
-            if "currency" in properties:
-                properties["currency"]["description"] = "MODIFIED: Three-letter ISO currency code"
-    
-    # Create new snapshot with modified schema
+    # Create new snapshot
     new_snapshot = Snapshot(
         endpoint_path="/v1/payment_intents",
         gateway="stripe",
         spec_type="openapi3",
-        schema_data=schema  # It's already a dict, no need to json.dumps
+        schema_data=schema
     )
     
     db.add(new_snapshot)
@@ -235,6 +229,7 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
         ],
         "next_step": "Run POST /monitor/run to detect these changes"
     }
+
 
 @app.post("/monitor/debug-last-comparison")
 async def debug_last_comparison(db: Session = Depends(get_db)):

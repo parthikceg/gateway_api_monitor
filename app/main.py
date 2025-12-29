@@ -261,3 +261,24 @@ async def debug_last_comparison(db: Session = Depends(get_db)):
             "has_metadata": "metadata" in latest.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {})
         }
     }
+
+
+@app.get("/monitor/debug-schema-structure")
+async def debug_schema_structure(db: Session = Depends(get_db)):
+    """See the actual structure of stored schemas"""
+    latest = db.query(Snapshot).order_by(Snapshot.created_at.desc()).first()
+    
+    if not latest:
+        return {"error": "No snapshots"}
+    
+    schema = latest.schema_data
+    
+    return {
+        "snapshot_id": str(latest.id),
+        "top_level_keys": list(schema.keys()),
+        "has_requestBody": "requestBody" in schema,
+        "has_properties_at_root": "properties" in schema,
+        "schema_preview": {
+            k: type(v).__name__ for k, v in list(schema.items())[:10]
+        }
+    }

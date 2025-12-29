@@ -175,8 +175,12 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
     if not latest:
         return {"error": "No snapshots found. Run /monitor/run first."}
     
-    # Parse the schema - it's in schema_data
-    schema = json.loads(latest.schema_data)
+    # schema_data is already a dict, no need to parse
+    schema = latest.schema_data if isinstance(latest.schema_data, dict) else json.loads(latest.schema_data)
+    
+    # Make a deep copy to avoid modifying the original
+    import copy
+    schema = copy.deepcopy(schema)
     
     # Modify the schema to simulate API changes
     if "requestBody" in schema and "content" in schema["requestBody"]:
@@ -210,7 +214,7 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
         endpoint_path="/v1/payment_intents",
         gateway="stripe",
         spec_type="openapi3",
-        schema_data=json.dumps(schema)
+        schema_data=schema  # It's already a dict, no need to json.dumps
     )
     
     db.add(new_snapshot)

@@ -162,57 +162,71 @@ async def get_subscriptions(db: Session = Depends(get_db)):
         ]
     }
 
-@app.post("/monitor/test")
-async def test_monitoring(db: Session = Depends(get_db)):
-    """Test endpoint: Compare a mock old schema against live Stripe API"""
+@app.post("/monitor/inject-test-snapshot")
+async def inject_test_snapshot(db: Session = Depends(get_db)):
+    """Create a modified snapshot for testing change detection"""
+    from app.models.models import Snapshot
+    import json
+    from datetime import datetime
     
-    # Create a simple old schema
-    old_schema = {
-        "type": "object",
-        "properties": {
-            "amount": {"type": "integer", "description": "Amount in cents"},
-            "currency": {"type": "string", "description": "Three-letter ISO code"}
-        },
-        "required": ["amount", "currency"]
-    }
+    # Get the latest real snapshot
+    latest = db.query(Snapshot).order_by(Snapshot.created_at.desc()).first()
     
-    # Create a new schema with changes
-    new_schema = {
-        "type": "object",
-        "properties": {
-            "amount": {"type": "integer", "description": "Amount in cents"},
-            "currency": {"type": "string", "description": "Three-letter ISO code"},
-            "metadata": {"type": "object", "description": "Set of key-value pairs"},  # NEW
-            "description": {"type": "string", "description": "Description of payment"},  # NEW
-            "customer": {"type": "string", "description": "Customer ID"}  # NEW
-        },
-        "required": ["amount", "currency", "customer"]  # customer is now required
-    }
+    if not latest:
+        return {"error": "No snapshots found. Run /monitor/run first."}
     
-    # Run diff
-    from app.services.diff_engine import DiffEngine
-    diff_engine = DiffEngine()
-    changes = diff_engine.compare_schemas(old_schema, new_schema)
+    # Parse the schema
+    schema = json.loads(latest.full_schema)
     
-    # Analyze with AI
-    from app.services.ai_analyzer import AIAnalyzer
-    ai_analyzer = AIAnalyzer()
+    # Modify the schema to simulate API changes
+    if "requestBody" in schema and "content" in schema["requestBody"]:
+        content = schema["requestBody"]["content"].get("application/x-www-form-urlencoded", {})
+        if "schema" in content and "properties" in content["schema"]:
+            properties = content["schema"]["properties"]
+            
+            # Change 1: Add a new property
+            properties["new_test_field"] = {
+                "type": "string",
+                "description": "A new test field added for testing"
+            }
+            
+            # Change 2: Remove an existing property
+            properties.pop("metadata", None)
+            
+            # Change 3: Change a field type
+            if "amount" in properties:
+                properties["amount"]["type"] = "string"  # Changed from integer
+            
+            # Change 4: Add a new required field
+            if "required" in content["schema"]:
+                content["schema"]["required"].append("new_test_field")
+            
+            # Change 5: Modify a description
+            if "currency" in properties:
+                properties["currency"]["description"] = "MODIFIED: Three-letter ISO currency code"
     
-    analyzed_changes = []
-    for change in changes:
-        summary = await ai_analyzer.analyze_change(change)
-        analyzed_changes.append({
-            "change_type": change["change_type"],
-            "field_path": change["field_path"],
-            "severity": change["severity"],
-            "old_value": change.get("old_value"),
-            "new_value": change.get("new_value"),
-            "ai_summary": summary
-        })
+    # Create new snapshot with modified schema
+    new_snapshot = Snapshot(
+        endpoint="/v1/payment_intents",
+        full_schema=json.dumps(schema),
+        schema_hash="test_modified_" + latest.schema_hash
+    )
+    
+    db.add(new_snapshot)
+    db.commit()
+    db.refresh(new_snapshot)
     
     return {
-        "status": "test_success",
-        "message": "Testing change detection with mock schemas",
-        "changes_detected": len(changes),
-        "changes": analyzed_changes
+        "status": "success",
+        "message": "Created modified test snapshot",
+        "original_snapshot_id": str(latest.id),
+        "new_snapshot_id": str(new_snapshot.id),
+        "modifications": [
+            "Added new_test_field property",
+            "Removed metadata property",
+            "Changed amount type from integer to string",
+            "Made new_test_field required",
+            "Modified currency description"
+        ],
+        "next_step": "Run POST /monitor/run to detect these changes"
     }

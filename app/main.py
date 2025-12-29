@@ -169,7 +169,7 @@ async def test_monitoring(db: Session = Depends(get_db)):
     # Fetch REAL current Stripe schema
     from app.services.stripe_crawler import StripeCrawler
     crawler = StripeCrawler()
-    current_spec = await crawler.fetch_spec()  # Added await back
+    current_spec = await crawler.fetch_spec()
     current_schema = current_spec.get("paths", {}).get("/v1/payment_intents", {}).get("post", {})
     
     # Create a simplified "old" version by removing some fields
@@ -189,7 +189,7 @@ async def test_monitoring(db: Session = Depends(get_db)):
     # Run diff between old (modified) and current (real)
     from app.services.diff_engine import DiffEngine
     diff_engine = DiffEngine()
-    changes = diff_engine.compare_schemas(old_schema, current_schema, "/v1/payment_intents")
+    changes = diff_engine.compare_schemas(old_schema, current_schema)  # Removed the 3rd argument
     
     # Analyze with AI
     from app.services.ai_analyzer import AIAnalyzer
@@ -197,7 +197,7 @@ async def test_monitoring(db: Session = Depends(get_db)):
     
     analyzed_changes = []
     for change in changes:
-        summary = await ai_analyzer.analyze_change(change)  # Added await back
+        summary = await ai_analyzer.analyze_change(change)
         analyzed_changes.append({
             "change_type": change["change_type"],
             "field_path": change["field_path"],

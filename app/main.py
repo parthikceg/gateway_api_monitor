@@ -175,16 +175,8 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
     if not latest:
         return {"error": "No snapshots found. Run /monitor/run first."}
     
-    # Parse the schema - check which attribute exists
-    schema = None
-    if hasattr(latest, 'full_schema'):
-        schema = json.loads(latest.full_schema)
-    elif hasattr(latest, 'schema_json'):
-        schema = json.loads(latest.schema_json)
-    elif hasattr(latest, 'schema'):
-        schema = json.loads(latest.schema)
-    else:
-        return {"error": "Could not find schema attribute", "available_attrs": dir(latest)}
+    # Parse the schema - it's in schema_data
+    schema = json.loads(latest.schema_data)
     
     # Modify the schema to simulate API changes
     if "requestBody" in schema and "content" in schema["requestBody"]:
@@ -215,17 +207,11 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
     
     # Create new snapshot with modified schema
     new_snapshot = Snapshot(
-        endpoint="/v1/payment_intents",
-        schema_hash="test_modified_" + (latest.schema_hash or "")
+        endpoint_path="/v1/payment_intents",
+        gateway="stripe",
+        spec_type="openapi3",
+        schema_data=json.dumps(schema)
     )
-    
-    # Set the schema using the correct attribute name
-    if hasattr(latest, 'full_schema'):
-        new_snapshot.full_schema = json.dumps(schema)
-    elif hasattr(latest, 'schema_json'):
-        new_snapshot.schema_json = json.dumps(schema)
-    elif hasattr(latest, 'schema'):
-        new_snapshot.schema = json.dumps(schema)
     
     db.add(new_snapshot)
     db.commit()

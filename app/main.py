@@ -235,3 +235,29 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
         ],
         "next_step": "Run POST /monitor/run to detect these changes"
     }
+
+@app.post("/monitor/debug-last-comparison")
+async def debug_last_comparison(db: Session = Depends(get_db)):
+    """See what the last monitoring run compared"""
+    snapshots = db.query(Snapshot).order_by(Snapshot.created_at.desc()).limit(2).all()
+    
+    if len(snapshots) < 2:
+        return {"error": "Need at least 2 snapshots"}
+    
+    latest = snapshots[0]
+    previous = snapshots[1]
+    
+    return {
+        "previous_snapshot": {
+            "id": str(previous.id),
+            "created_at": previous.created_at.isoformat(),
+            "has_new_test_field": "new_test_field" in previous.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {}),
+            "has_metadata": "metadata" in previous.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {})
+        },
+        "latest_snapshot": {
+            "id": str(latest.id),
+            "created_at": latest.created_at.isoformat(),
+            "has_new_test_field": "new_test_field" in latest.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {}),
+            "has_metadata": "metadata" in latest.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {})
+        }
+    }

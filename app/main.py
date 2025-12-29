@@ -94,6 +94,27 @@ async def get_snapshots(
     }
 
 
+@app.get("/snapshots/{snapshot_id}")
+async def get_snapshot_detail(snapshot_id: str, db: Session = Depends(get_db)):
+    """Get full snapshot details including schema"""
+    from uuid import UUID
+    
+    try:
+        snapshot = db.query(Snapshot).filter(Snapshot.id == UUID(snapshot_id)).first()
+        
+        if not snapshot:
+            raise HTTPException(status_code=404, detail="Snapshot not found")
+        
+        return {
+            "id": str(snapshot.id),
+            "gateway": snapshot.gateway,
+            "endpoint": snapshot.endpoint_path,
+            "created_at": snapshot.created_at.isoformat(),
+            "schema_data": snapshot.schema_data  # Full schema!
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.get("/changes")
 async def get_changes(
     limit: int = 20,

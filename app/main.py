@@ -161,3 +161,53 @@ async def get_subscriptions(db: Session = Depends(get_db)):
             for s in subscriptions
         ]
     }
+
+@app.post("/monitor/test")
+async def test_monitoring(db: Session = Depends(get_db)):
+    """Test endpoint: Compare a mock old schema against live Stripe API"""
+    
+    # Fetch REAL current Stripe schema
+    from app.services.stripe_crawler import StripeCrawler
+    crawler = StripeCrawler()
+    current_spec = await crawler.fetch_openapi_spec()
+    current_schema = current_spec.get("paths", {}).get("/v1/payment_intents", {}).get("post", {})
+    
+    # Create a simplified "old" version by removing some fields
+    import copy
+    old_schema = copy.deepcopy(current_schema)
+    
+    # Simulate changes: Remove some properties from the old schema
+    if "requestBody" in old_schema:
+        request_body = old_schema["requestBody"]["content"]["application/x-www-form-urlencoded"]["schema"]
+        properties = request_body.get("properties", {})
+        
+        # Remove a few fields to simulate they were "added" in the new version
+        fields_to_remove = ["metadata", "description", "statement_descriptor"]
+        for field in fields_to_remove:
+            properties.pop(field, None)
+    
+    # Run diff between old (modified) and current (real)
+    from app.services.diff_engine import DiffEngine
+    diff_engine = DiffEngine()
+    changes = diff_engine.compare_schemas(old_schema, current_schema, "/v1/payment_intents")
+    
+    # Analyze with AI
+    from app.services.ai_analyzer import AIAnalyzer
+    ai_analyzer = AIAnalyzer()
+    
+    analyzed_changes = []
+    for change in changes:
+        summary = await ai_analyzer.analyze_change(change)
+        analyzed_changes.append({
+            "change_type": change["change_type"],
+            "field_path": change["field_path"],
+            "severity": change["severity"],
+            "ai_summary": summary
+        })
+    
+    return {
+        "status": "test_success",
+        "message": "Compared modified old schema vs live Stripe API",
+        "changes_detected": len(changes),
+        "changes": analyzed_changes
+    }

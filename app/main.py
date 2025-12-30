@@ -531,3 +531,22 @@ async def debug_schema_structure(db: Session = Depends(get_db)):
             k: type(v).__name__ for k, v in list(schema.items())[:10]
         }
     }
+
+
+@app.get("/admin/debug-spec-types")
+async def debug_spec_types(db: Session = Depends(get_db)):
+    """Debug: Show all unique spec_type values in database"""
+    from sqlalchemy import text
+    from app.db.database import engine
+    
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT DISTINCT spec_type FROM snapshots"))
+            values = [row[0] for row in result]
+        
+        return {
+            "unique_spec_types": values,
+            "count": len(values)
+        }
+    except Exception as e:
+        return {"error": str(e)}

@@ -384,7 +384,7 @@ async def run_migration():
     
     try:
         with engine.connect() as conn:
-            # Add spec_type column
+            # Add spec_type column if not exists
             conn.execute(text("""
                 ALTER TABLE snapshots 
                 ADD COLUMN IF NOT EXISTS spec_type VARCHAR DEFAULT 'STABLE'
@@ -402,12 +402,18 @@ async def run_migration():
                 ADD COLUMN IF NOT EXISTS change_maturity VARCHAR
             """))
             
+            # CRITICAL: Update old 'primary' values to 'stable'
+            conn.execute(text("""
+                UPDATE snapshots 
+                SET spec_type = 'STABLE' 
+                WHERE spec_type = 'primary' OR spec_type = 'openapi3'
+            """))
+            
             conn.commit()
         
-        return {"status": "success", "message": "Migration completed!"}
+        return {"status": "success", "message": "Migration completed! Old data updated."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
-
 
 
 @app.post("/monitor/inject-test-snapshot")

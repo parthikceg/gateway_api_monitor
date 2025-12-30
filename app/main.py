@@ -371,6 +371,41 @@ async def get_subscriptions(db: Session = Depends(get_db)):
 # TEST ENDPOINTS (Keep existing ones)
 # ============================================================================
 
+
+@app.post("/admin/migrate")
+async def run_migration():
+    """Run database migration for multi-tier support"""
+    from sqlalchemy import text
+    from app.db.database import engine
+    
+    try:
+        with engine.connect() as conn:
+            # Add spec_type column
+            conn.execute(text("""
+                ALTER TABLE snapshots 
+                ADD COLUMN IF NOT EXISTS spec_type VARCHAR DEFAULT 'STABLE'
+            """))
+            
+            # Add spec_url column
+            conn.execute(text("""
+                ALTER TABLE snapshots 
+                ADD COLUMN IF NOT EXISTS spec_url VARCHAR
+            """))
+            
+            # Add change_maturity column
+            conn.execute(text("""
+                ALTER TABLE changes 
+                ADD COLUMN IF NOT EXISTS change_maturity VARCHAR
+            """))
+            
+            conn.commit()
+        
+        return {"status": "success", "message": "Migration completed!"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+
 @app.post("/monitor/inject-test-snapshot")
 async def inject_test_snapshot(db: Session = Depends(get_db)):
     """Create a modified snapshot for testing change detection"""

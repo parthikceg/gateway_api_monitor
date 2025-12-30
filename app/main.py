@@ -197,27 +197,28 @@ async def get_snapshot_detail(snapshot_id: str, db: Session = Depends(get_db)):
 @app.get("/snapshots/stats")
 async def get_snapshot_stats(db: Session = Depends(get_db)):
     """Get snapshot statistics by tier"""
-    from sqlalchemy import func
-    
     try:
-        stats = db.query(
-            Snapshot.spec_type,
-            func.count(Snapshot.id).label('count')
-        ).group_by(Snapshot.spec_type).all()
+        # Get all snapshots and count manually (safer than SQL GROUP BY with enums)
+        all_snapshots = db.query(Snapshot).all()
+        
+        stats = {}
+        for snapshot in all_snapshots:
+            # Safely get the tier value
+            tier_value = snapshot.spec_type.value if hasattr(snapshot.spec_type, 'value') else str(snapshot.spec_type)
+            
+            if tier_value not in stats:
+                stats[tier_value] = 0
+            stats[tier_value] += 1
         
         return {
             "stats": [
-                {
-                    "tier": stat.spec_type.value if hasattr(stat.spec_type, 'value') else str(stat.spec_type),
-                    "count": stat.count
-                }
-                for stat in stats
+                {"tier": tier, "count": count}
+                for tier, count in stats.items()
             ]
         }
     except Exception as e:
-        logger.error(f"Error fetching snapshot stats: {e}")
+        logger.error(f"Error fetching snapshot stats: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
-
 
 # ============================================================================
 # CHANGES ENDPOINTS

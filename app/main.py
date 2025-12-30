@@ -199,20 +199,24 @@ async def get_snapshot_stats(db: Session = Depends(get_db)):
     """Get snapshot statistics by tier"""
     from sqlalchemy import func
     
-    stats = db.query(
-        Snapshot.spec_type,
-        func.count(Snapshot.id).label('count')
-    ).group_by(Snapshot.spec_type).all()
-    
-    return {
-        "stats": [
-            {
-                "tier": stat[0].value,
-                "count": stat[1]
-            }
-            for stat in stats
-        ]
-    }
+    try:
+        stats = db.query(
+            Snapshot.spec_type,
+            func.count(Snapshot.id).label('count')
+        ).group_by(Snapshot.spec_type).all()
+        
+        return {
+            "stats": [
+                {
+                    "tier": stat.spec_type.value if hasattr(stat.spec_type, 'value') else str(stat.spec_type),
+                    "count": stat.count
+                }
+                for stat in stats
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching snapshot stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================

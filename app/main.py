@@ -2,12 +2,12 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 import logging
 
 from app.config import get_settings
 from app.db.database import get_db, init_db
-from app.models.models import Snapshot, Change, AlertSubscription
+from app.models.models import Snapshot, Change, AlertSubscription, SpecType, ChangeMaturity
 from app.services.monitoring_service import MonitoringService
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
 
@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 app = FastAPI(
     title="Gateway Monitor API",
-    description="Monitor Stripe API changes automatically",
-    version="1.0.0"
+    description="Monitor Stripe API changes automatically across multiple tiers",
+    version="2.0.0"
 )
 
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -57,29 +57,104 @@ async def root():
     return {
         "status": "healthy",
         "service": "Gateway Monitor",
-        "version": "1.0.0"
+        "version": "2.0.0",
+        "tiers": ["stable", "preview", "beta"]
     }
 
 
+# ============================================================================
+# MONITORING ENDPOINTS
+# ============================================================================
+
 @app.post("/monitor/run")
-async def run_monitoring(db: Session = Depends(get_db)):
-    """Manually trigger monitoring"""
+async def run_monitoring(
+    tier: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger monitoring for all tiers or a specific tier
+    
+    Query params:
+    - tier: Optional - 'stable', 'preview', or 'beta'. If not provided, runs all tiers.
+    """
     try:
         service = MonitoringService(db)
-        result = await service.run_monitoring()
-        return result
+        
+        if tier:
+            # Run single tier
+            if tier not in ["stable", "preview", "beta"]:
+                raise HTTPException(status_code=400, detail="Invalid tier. Must be stable, preview, or beta")
+            
+            result = await service._monitor_tier(tier)
+            return result
+        else:
+            # Run all tiers
+            result = await service.run_monitoring()
+            return result
+            
     except Exception as e:
         logger.error(f"Monitoring failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/monitor/compare")
+async def compare_tiers(
+    source: str,
+    target: str = "stable",
+    db: Session = Depends(get_db)
+):
+    """
+    Compare two tiers to see upcoming features
+    
+    Query params:
+    - source: Tier to compare from ('preview' or 'beta')
+    - target: Tier to compare against (default: 'stable')
+    
+    Examples:
+    - /monitor/compare?source=preview&target=stable - See what's coming from preview to stable
+    - /monitor/compare?source=beta&target=stable - See what's in beta vs stable
+    """
+    try:
+        if source not in ["preview", "beta"]:
+            raise HTTPException(status_code=400, detail="Source must be preview or beta")
+        if target not in ["stable", "preview"]:
+            raise HTTPException(status_code=400, detail="Target must be stable or preview")
+        
+        service = MonitoringService(db)
+        result = await service._compare_tiers(source, target)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Comparison failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# SNAPSHOT ENDPOINTS
+# ============================================================================
+
 @app.get("/snapshots")
 async def get_snapshots(
     limit: int = 10,
+    tier: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get recent snapshots"""
-    snapshots = db.query(Snapshot)        .order_by(Snapshot.created_at.desc())        .limit(limit)        .all()
+    """
+    Get recent snapshots
+    
+    Query params:
+    - limit: Number of snapshots to return (default: 10)
+    - tier: Filter by tier - 'stable', 'preview', or 'beta' (optional)
+    """
+    query = db.query(Snapshot)
+    
+    if tier:
+        if tier not in ["stable", "preview", "beta"]:
+            raise HTTPException(status_code=400, detail="Invalid tier")
+        spec_type_enum = SpecType[tier.upper()]
+        query = query.filter(Snapshot.spec_type == spec_type_enum)
+    
+    snapshots = query.order_by(Snapshot.created_at.desc()).limit(limit).all()
     
     return {
         "snapshots": [
@@ -87,6 +162,7 @@ async def get_snapshots(
                 "id": str(s.id),
                 "gateway": s.gateway,
                 "endpoint": s.endpoint_path,
+                "tier": s.spec_type.value,
                 "created_at": s.created_at.isoformat()
             }
             for s in snapshots
@@ -109,23 +185,74 @@ async def get_snapshot_detail(snapshot_id: str, db: Session = Depends(get_db)):
             "id": str(snapshot.id),
             "gateway": snapshot.gateway,
             "endpoint": snapshot.endpoint_path,
+            "tier": snapshot.spec_type.value,
+            "spec_url": snapshot.spec_url,
             "created_at": snapshot.created_at.isoformat(),
-            "schema_data": snapshot.schema_data  # Full schema!
+            "schema_data": snapshot.schema_data
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/snapshots/stats")
+async def get_snapshot_stats(db: Session = Depends(get_db)):
+    """Get snapshot statistics by tier"""
+    from sqlalchemy import func
+    
+    stats = db.query(
+        Snapshot.spec_type,
+        func.count(Snapshot.id).label('count')
+    ).group_by(Snapshot.spec_type).all()
+    
+    return {
+        "stats": [
+            {
+                "tier": stat[0].value,
+                "count": stat[1]
+            }
+            for stat in stats
+        ]
+    }
+
+
+# ============================================================================
+# CHANGES ENDPOINTS
+# ============================================================================
 
 @app.get("/changes")
 async def get_changes(
     limit: int = 20,
     severity: str = None,
+    tier: Optional[str] = None,
+    maturity: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    """Get recent changes"""
-    query = db.query(Change)
+    """
+    Get recent changes with filtering
+    
+    Query params:
+    - limit: Number of changes (default: 20)
+    - severity: Filter by severity - 'high', 'medium', 'low', 'info'
+    - tier: Filter by tier - 'stable', 'preview', 'beta'
+    - maturity: Filter by maturity - 'stable_change', 'new_preview', 'new_beta', etc.
+    """
+    query = db.query(Change).join(Snapshot)
     
     if severity:
         query = query.filter(Change.severity == severity)
+    
+    if tier:
+        if tier not in ["stable", "preview", "beta"]:
+            raise HTTPException(status_code=400, detail="Invalid tier")
+        spec_type_enum = SpecType[tier.upper()]
+        query = query.filter(Snapshot.spec_type == spec_type_enum)
+    
+    if maturity:
+        try:
+            maturity_enum = ChangeMaturity[maturity.upper()]
+            query = query.filter(Change.change_maturity == maturity_enum)
+        except KeyError:
+            raise HTTPException(status_code=400, detail="Invalid maturity level")
     
     changes = query.order_by(Change.detected_at.desc()).limit(limit).all()
     
@@ -137,6 +264,8 @@ async def get_changes(
                 "field": c.field_path,
                 "severity": c.severity,
                 "category": c.change_category,
+                "maturity": c.change_maturity.value if c.change_maturity else None,
+                "tier": c.snapshot.spec_type.value,
                 "summary": c.ai_summary,
                 "detected_at": c.detected_at.isoformat()
             }
@@ -144,6 +273,58 @@ async def get_changes(
         ]
     }
 
+
+@app.get("/changes/upcoming")
+async def get_upcoming_features(
+    source_tier: str = "preview",
+    db: Session = Depends(get_db)
+):
+    """
+    Get upcoming features from preview/beta tiers
+    
+    Query params:
+    - source_tier: 'preview' or 'beta' (default: preview)
+    """
+    if source_tier not in ["preview", "beta"]:
+        raise HTTPException(status_code=400, detail="Source tier must be preview or beta")
+    
+    service = MonitoringService(db)
+    result = await service._compare_tiers(source_tier, "stable")
+    
+    return result
+
+
+@app.get("/changes/pipeline")
+async def get_feature_pipeline(db: Session = Depends(get_db)):
+    """
+    Get complete feature pipeline showing progression from beta -> preview -> stable
+    """
+    service = MonitoringService(db)
+    
+    # Get beta vs stable
+    beta_pipeline = await service._compare_tiers("beta", "stable")
+    
+    # Get preview vs stable
+    preview_pipeline = await service._compare_tiers("preview", "stable")
+    
+    return {
+        "pipeline": {
+            "beta_experiments": {
+                "count": beta_pipeline.get("upcoming_features_count", 0),
+                "features": beta_pipeline.get("changes", [])
+            },
+            "preview_features": {
+                "count": preview_pipeline.get("upcoming_features_count", 0),
+                "features": preview_pipeline.get("changes", []),
+                "estimated_timeline": "4-10 weeks to GA"
+            }
+        }
+    }
+
+
+# ============================================================================
+# SUBSCRIPTION ENDPOINTS
+# ============================================================================
 
 @app.post("/subscriptions")
 async def create_subscription(
@@ -170,7 +351,9 @@ async def create_subscription(
 @app.get("/subscriptions")
 async def get_subscriptions(db: Session = Depends(get_db)):
     """Get all active subscriptions"""
-    subscriptions = db.query(AlertSubscription)        .filter(AlertSubscription.is_active == True)        .all()
+    subscriptions = db.query(AlertSubscription) \
+        .filter(AlertSubscription.is_active == True) \
+        .all()
     
     return {
         "subscriptions": [
@@ -182,6 +365,11 @@ async def get_subscriptions(db: Session = Depends(get_db)):
             for s in subscriptions
         ]
     }
+
+
+# ============================================================================
+# TEST ENDPOINTS (Keep existing ones)
+# ============================================================================
 
 @app.post("/monitor/inject-test-snapshot")
 async def inject_test_snapshot(db: Session = Depends(get_db)):

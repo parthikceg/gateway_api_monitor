@@ -1,51 +1,63 @@
-"""Database models"""
-from sqlalchemy import Column, String, DateTime, Boolean, Text, ForeignKey, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.sql import func
+from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, JSON, Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
+from datetime import datetime
+import enum
 
 from app.db.database import Base
 
+class SpecType(enum.Enum):
+    """Specification maturity levels"""
+    STABLE = "stable"        # spec3.json - General Availability
+    PREVIEW = "preview"      # spec3.sdk.json - Preview features
+    BETA = "beta"           # spec3.beta.sdk.json - Beta experiments
 
 class Snapshot(Base):
-    """Stores API schema snapshots"""
     __tablename__ = "snapshots"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    gateway = Column(String(50), nullable=False, index=True)
-    endpoint_path = Column(String(255), nullable=False, index=True)
-    spec_type = Column(String(50), nullable=False, default='primary', index=True)
-    schema_data = Column(JSONB, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    gateway = Column(String, nullable=False)
+    endpoint_path = Column(String, nullable=False)
+    spec_type = Column(SQLEnum(SpecType), nullable=False, default=SpecType.STABLE)  # NEW!
+    spec_url = Column(String, nullable=True)  # NEW - track source URL
+    schema_data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
-    changes = relationship("Change", back_populates="snapshot", cascade="all, delete-orphan")
+    # Relationships
+    changes = relationship("Change", back_populates="snapshot")
 
+class ChangeMaturity(enum.Enum):
+    """Change maturity classification"""
+    STABLE_CHANGE = "stable_change"           # Change in GA version
+    PREVIEW_TO_STABLE = "preview_to_stable"   # Preview feature going GA
+    BETA_TO_PREVIEW = "beta_to_preview"       # Beta moving to preview
+    NEW_PREVIEW = "new_preview"               # New in preview
+    NEW_BETA = "new_beta"                     # New in beta
 
 class Change(Base):
-    """Stores detected API changes"""
     __tablename__ = "changes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    snapshot_id = Column(UUID(as_uuid=True), ForeignKey("snapshots.id"), nullable=False)
-    change_type = Column(String(50), nullable=False, index=True)
-    field_path = Column(String(500), nullable=False)
-    old_value = Column(JSONB)
-    new_value = Column(JSONB)
-    ai_summary = Column(Text)
-    severity = Column(String(20), index=True)
-    change_category = Column(String(50), index=True)
-    detected_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    snapshot_id = Column(UUID(as_uuid=True), nullable=False)
+    change_type = Column(String, nullable=False)
+    field_path = Column(String, nullable=False)
+    old_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
+    severity = Column(String, nullable=False)
+    change_category = Column(String, nullable=True)
+    change_maturity = Column(SQLEnum(ChangeMaturity), nullable=True)  # NEW!
+    ai_summary = Column(Text, nullable=True)
+    detected_at = Column(DateTime, default=datetime.utcnow)
     
+    # Relationships
     snapshot = relationship("Snapshot", back_populates="changes")
 
-
 class AlertSubscription(Base):
-    """Email alert subscriptions"""
     __tablename__ = "alert_subscriptions"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    email = Column(String(255), nullable=False, unique=True, index=True)
-    gateway = Column(String(50))  # None = all gateways
+    email = Column(String, nullable=False, unique=True)
+    gateway = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime, default=datetime.utcnow)

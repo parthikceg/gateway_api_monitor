@@ -1,71 +1,64 @@
-"""Stripe API specification crawler"""
+"""Stripe API crawler service"""
 import httpx
-import json
-from typing import Dict, Any, Optional
 import logging
+from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
-
 class StripeCrawler:
-    """Crawls Stripe's OpenAPI specification"""
+    """Fetches Stripe API specifications from GitHub"""
     
-    STRIPE_OPENAPI_URL = "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json"
+    # Stripe OpenAPI spec URLs - Multi-tier
+    SPEC_URLS = {
+        "stable": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+        "preview": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.sdk.json",
+        "beta": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.beta.sdk.json"
+    }
     
-    async def fetch_spec(self) -> Optional[Dict[str, Any]]:
-        """Fetch the complete Stripe OpenAPI specification"""
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(self.STRIPE_OPENAPI_URL)
-                response.raise_for_status()
-                return response.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch Stripe OpenAPI spec: {e}")
-            return None
-    
-    async def extract_payment_intents_schema(self, spec: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Extract Payment Intents endpoint schema from spec"""
-        try:
-            # Payment Intents endpoints
-            paths = spec.get("paths", {})
-            
-            # Get create payment intent endpoint
-            create_endpoint = paths.get("/v1/payment_intents", {})
-            post_method = create_endpoint.get("post", {})
-            
-            # Get retrieve payment intent endpoint
-            retrieve_endpoint = paths.get("/v1/payment_intents/{intent}", {})
-            get_method = retrieve_endpoint.get("get", {})
-            
-            # Extract schemas
-            components = spec.get("components", {}).get("schemas", {})
-            
-            payment_intent_schema = components.get("payment_intent", {})
-            
-            return {
-                "endpoint": "/v1/payment_intents",
-                "methods": {
-                    "POST": {
-                        "parameters": post_method.get("requestBody", {}),
-                        "responses": post_method.get("responses", {})
-                    },
-                    "GET": {
-                        "parameters": get_method.get("parameters", []),
-                        "responses": get_method.get("responses", {})
-                    }
-                },
-                "schema": payment_intent_schema,
-                "properties": payment_intent_schema.get("properties", {}),
-                "required": payment_intent_schema.get("required", [])
-            }
-        except Exception as e:
-            logger.error(f"Failed to extract Payment Intents schema: {e}")
-            return None
-    
-    async def get_payment_intents_snapshot(self) -> Optional[Dict[str, Any]]:
-        """Get a complete snapshot of Payment Intents API"""
-        spec = await self.fetch_spec()
-        if not spec:
-            return None
+    async def fetch_spec(self, spec_type: str = "stable") -> Dict[str, Any]:
+        """
+        Fetch OpenAPI specification from Stripe
         
-        return await self.extract_payment_intents_schema(spec)
+        Args:
+            spec_type: One of 'stable', 'preview', or 'beta'
+        """
+        url = self.SPEC_URLS.get(spec_type)
+        if not url:
+            raise ValueError(f"Invalid spec_type: {spec_type}")
+        
+        logger.info(f"Fetching {spec_type} spec from: {url}")
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+    
+    async def get_payment_intents_snapshot(self, spec_type: str = "stable") -> Dict[str, Any]:
+        """
+        Extract Payment Intents endpoint schema from spec
+        
+        Args:
+            spec_type: One of 'stable', 'preview', or 'beta'
+        """
+        spec = await self.fetch_spec(spec_type)
+        
+        # Extract POST /v1/payment_intents endpoint
+        payment_intents_path = spec.get("paths", {}).get("/v1/payment_intents", {})
+        post_endpoint = payment_intents_path.get("post", {})
+        
+        if not post_endpoint:
+            raise ValueError("Payment Intents POST endpoint not found in spec")
+        
+        # Extract request schema
+        request_body = post_endpoint.get("requestBody", {})
+        content = request_body.get("content", {}).get("application/x-www-form-urlencoded", {})
+        schema = content.get("schema", {})
+        
+        # Return structured snapshot
+        return {
+            "endpoint": "/v1/payment_intents",
+            "methods": {"post": post_endpoint.get("summary", "")},
+            "schema": schema,
+            "properties": schema.get("properties", {}),
+            "required": schema.get("required", [])
+        }

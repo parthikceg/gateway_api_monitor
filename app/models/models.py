@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, JSON, Enum as SQLEnum
+from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, JSON, Enum as SQLEnum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -13,20 +13,6 @@ class SpecType(enum.Enum):
     PREVIEW = "preview"      # spec3.sdk.json - Preview features
     BETA = "beta"           # spec3.beta.sdk.json - Beta experiments
 
-class Snapshot(Base):
-    __tablename__ = "snapshots"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    gateway = Column(String, nullable=False)
-    endpoint_path = Column(String, nullable=False)
-    spec_type = Column(SQLEnum(SpecType), nullable=False, default=SpecType.STABLE)  # NEW!
-    spec_url = Column(String, nullable=True)  # NEW - track source URL
-    schema_data = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relationships
-    changes = relationship("Change", back_populates="snapshot")
-
 class ChangeMaturity(enum.Enum):
     """Change maturity classification"""
     STABLE_CHANGE = "stable_change"           # Change in GA version
@@ -35,18 +21,32 @@ class ChangeMaturity(enum.Enum):
     NEW_PREVIEW = "new_preview"               # New in preview
     NEW_BETA = "new_beta"                     # New in beta
 
+class Snapshot(Base):
+    __tablename__ = "snapshots"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    gateway = Column(String, nullable=False)
+    endpoint_path = Column(String, nullable=False)
+    spec_type = Column(SQLEnum(SpecType), nullable=False, default=SpecType.STABLE)
+    spec_url = Column(String, nullable=True)
+    schema_data = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    changes = relationship("Change", back_populates="snapshot", cascade="all, delete-orphan")
+
 class Change(Base):
     __tablename__ = "changes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    snapshot_id = Column(UUID(as_uuid=True), nullable=False)
+    snapshot_id = Column(UUID(as_uuid=True), ForeignKey('snapshots.id'), nullable=False)  # FIXED: Added ForeignKey
     change_type = Column(String, nullable=False)
     field_path = Column(String, nullable=False)
     old_value = Column(Text, nullable=True)
     new_value = Column(Text, nullable=True)
     severity = Column(String, nullable=False)
     change_category = Column(String, nullable=True)
-    change_maturity = Column(SQLEnum(ChangeMaturity), nullable=True)  # NEW!
+    change_maturity = Column(SQLEnum(ChangeMaturity), nullable=True)
     ai_summary = Column(Text, nullable=True)
     detected_at = Column(DateTime, default=datetime.utcnow)
     

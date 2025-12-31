@@ -170,6 +170,34 @@ async def get_snapshots(
     }
 
 
+@app.get("/snapshots/stats")
+async def get_snapshot_stats(db: Session = Depends(get_db)):
+    """Get snapshot statistics by tier"""
+    try:
+        from sqlalchemy import func
+        
+        # Count snapshots by spec_type
+        results = db.query(
+            Snapshot.spec_type,
+            func.count(Snapshot.id).label('count')
+        ).group_by(Snapshot.spec_type).all()
+        
+        return {
+            "stats": [
+                {
+                    "tier": result.spec_type.value if hasattr(result.spec_type, 'value') else str(result.spec_type),
+                    "count": result.count
+                }
+                for result in results
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error fetching snapshot stats: {e}", exc_info=True)
+        # Return empty stats instead of failing
+        return {"stats": []}
+
+
+
 @app.get("/snapshots/{snapshot_id}")
 async def get_snapshot_detail(snapshot_id: str, db: Session = Depends(get_db)):
     """Get full snapshot details including schema"""
@@ -194,31 +222,6 @@ async def get_snapshot_detail(snapshot_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/snapshots/stats")
-async def get_snapshot_stats(db: Session = Depends(get_db)):
-    """Get snapshot statistics by tier"""
-    try:
-        # Get all snapshots and count manually (safer than SQL GROUP BY with enums)
-        all_snapshots = db.query(Snapshot).all()
-        
-        stats = {}
-        for snapshot in all_snapshots:
-            # Safely get the tier value
-            tier_value = snapshot.spec_type.value if hasattr(snapshot.spec_type, 'value') else str(snapshot.spec_type)
-            
-            if tier_value not in stats:
-                stats[tier_value] = 0
-            stats[tier_value] += 1
-        
-        return {
-            "stats": [
-                {"tier": tier, "count": count}
-                for tier, count in stats.items()
-            ]
-        }
-    except Exception as e:
-        logger.error(f"Error fetching snapshot stats: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 # ============================================================================
 # CHANGES ENDPOINTS

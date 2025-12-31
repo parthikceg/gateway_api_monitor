@@ -1,0 +1,130 @@
+[11:44 am, 31/12/2025] +91 89460 53078: - CASE OPERATOR
+SELECT name, marks,
+CASE
+   WHEN marks >= 90 THEN 'A'
+   WHEN marks >= 75 THEN 'B'
+   ELSE 'C'
+END AS grade
+FROM students;
+[11:50 am, 31/12/2025] +91 89460 53078: -- ARITHMETIC OPERATORS
+SELECT salary + 5000 FROM employees;
+SELECT salary - 3000 FROM employees;
+SELECT salary * 12 FROM employees;
+SELECT salary / 2 FROM employees;
+SELECT salary % 2 FROM employees;
+
+-- COMPARISON OPERATORS
+SELECT * FROM employees WHERE salary = 40000;
+SELECT * FROM employees WHERE salary != 40000;
+SELECT * FROM employees WHERE salary > 40000;
+SELECT * FROM employees WHERE salary < 40000;
+SELECT * FROM employees WHERE salary >= 40000;
+SELECT * FROM employees WHERE salary <= 40000;
+
+-- LOGICAL OPERATORS
+SELECT * FROM employees WHERE department = 'IT' AND salary > 50000;
+SELECT * FROM employees WHERE department = 'IT' OR department = 'HR';
+SELECT * FROM employees WHERE NOT department = 'HR';
+- BETWEEN OPERATOR
+SELECT * FROM students WHERE marks BETWEEN 60 AND 80;
+
+-- IN / NOT IN OPERATORS
+SELECT * FROM employees WHERE department IN ('IT','HR','Finance');
+SELECT * FROM employees WHERE department NOT IN ('HR');
+
+-- LIKE OPERATOR
+SELECT * FROM employees WHERE name LIKE 'A%';
+SELECT * FROM employees WHERE name LIKE '_a%';
+
+-- IS NULL / IS NOT NULL
+SELECT * FROM orders WHERE shipdate IS NULL;
+SELECT * FROM orders WHERE shipdate IS NOT NULL;
+
+-- ANY OPERATOR
+SELECT * FROM employees
+WHERE salary > ANY (
+    SELECT salary FROM employees WHERE department = 'HR'
+);
+
+-- ALL OPERATOR
+SELECT * FROM employees
+WHERE salary > ALL (
+    SELECT salary FROM employees WHERE department = 'HR'
+);
+
+-- EXISTS OPERATOR
+SELECT * FROM employees e
+WHERE EXISTS (
+    SELECT * FROM departments d
+    WHERE e.department = d.department
+);
+
+-- CASE OPERATOR
+SELECT name, marks,
+CASE
+   WHEN marks >= 90 THEN 'A'
+   WHEN marks >= 75 THEN 'B'
+   ELSE 'C'
+END AS grade
+FROM students;
+
+-- BITWISE OPERATORS (MySQL)
+SELECT 5 & 3;
+SELECT 5 | 3;
+SELECT 5 ^ 3;
+
+-- 1. LOGICAL OPERATORS (AND, OR, NOT)
+SELECT * FROM Employees
+WHERE Department = 'IT' AND Salary > 50000;
+
+SELECT * FROM Employees
+WHERE Department = 'IT' OR Department = 'HR';
+
+SELECT * FROM Employees
+WHERE NOT Department = 'HR';
+
+-- 2. BETWEEN OPERATOR (RANGE CHECK)
+SELECT * FROM Students
+WHERE Marks BETWEEN 60 AND 80;
+
+-- 3. IS NULL / IS NOT NULL
+SELECT * FROM Orders
+WHERE ShipDate IS NULL;
+
+SELECT * FROM Orders
+WHERE ShipDate IS NOT NULL;
+
+-- 7. ROW_NUMBER() WINDOW FUNCTION
+SELECT Name, Salary,
+ROW_NUMBER() OVER (ORDER BY Salary DESC) AS RowNum
+FROM Employees;
+
+-- 8. RANK() vs DENSE_RANK()
+SELECT Name, Salary,
+RANK() OVER (ORDER BY Salary DESC) AS R,
+DENSE_RANK() OVER (ORDER BY Salary DESC) AS DR
+FROM Employees;
+
+-- 9. CHECK CONSTRAINT
+CREATE TABLE Student (
+   ID INT,
+   Age INT CHECK (Age >= 18)
+);
+
+-- 10. CASCADING REFERENTIAL INTEGRITY
+CREATE TABLE Orders (
+    order_id INT PRIMARY KEY,
+    customer_id INT,
+    FOREIGN KEY (customer_id)
+    REFERENCES Customers(customer_id)
+    ON DELETE CASCADE
+);
+
+-- 11. SQL ORDER OF EXECUTION
+-- FROM
+-- JOIN
+-- WHERE
+-- GROUP BY
+-- HAVING
+-- SELECT
+-- ORDER BY

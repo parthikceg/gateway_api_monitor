@@ -1,5 +1,5 @@
 """AI-powered change analysis using OpenAI"""
-import openai
+from openai import OpenAI
 from typing import Dict, Any, Optional
 import json
 import logging
@@ -8,19 +8,18 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-
 class AIAnalyzer:
     """Uses AI to analyze and summarize API changes"""
     
     def __init__(self):
-        openai.api_key = settings.openai_api_key
+        self.client = OpenAI(api_key=settings.openai_api_key)
     
     async def analyze_change(self, change: Dict[str, Any]) -> Optional[str]:
         """Generate AI summary for a single change"""
         try:
             prompt = self._build_prompt(change)
             
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
                     {

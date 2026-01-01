@@ -10,6 +10,7 @@ from app.db.database import get_db, init_db
 from app.models.models import Snapshot, Change, AlertSubscription, SpecType, ChangeMaturity
 from app.services.monitoring_service import MonitoringService
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(
@@ -33,6 +34,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+pipeline_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 300  # 5 minutes cache
+}
 
 
 @app.on_event("startup")
@@ -304,18 +311,21 @@ async def get_upcoming_features(
 
 @app.get("/changes/pipeline")
 async def get_feature_pipeline(db: Session = Depends(get_db)):
-    """
-    Get complete feature pipeline showing progression from beta -> preview -> stable
-    """
+    """Get complete feature pipeline with caching"""
+    
+    # Check cache
+    now = datetime.utcnow()
+    if (pipeline_cache["data"] is not None and 
+        pipeline_cache["timestamp"] is not None and
+        (now - pipeline_cache["timestamp"]).total_seconds() < pipeline_cache["ttl"]):
+        return pipeline_cache["data"]
+    
+    # Generate fresh data
     service = MonitoringService(db)
-    
-    # Get beta vs stable
     beta_pipeline = await service._compare_tiers("beta", "stable")
-    
-    # Get preview vs stable
     preview_pipeline = await service._compare_tiers("preview", "stable")
     
-    return {
+    result = {
         "pipeline": {
             "beta_experiments": {
                 "count": beta_pipeline.get("upcoming_features_count", 0),
@@ -328,6 +338,12 @@ async def get_feature_pipeline(db: Session = Depends(get_db)):
             }
         }
     }
+    
+    # Update cache
+    pipeline_cache["data"] = result
+    pipeline_cache["timestamp"] = now
+    
+    return result
 
 
 # ============================================================================

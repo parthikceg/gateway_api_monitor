@@ -1,12 +1,14 @@
 """Application configuration"""
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+import os
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
-    database_url: str
-    openai_api_key: str
+    database_url: str = os.environ.get("DATABASE_URL", "")
+    openai_api_key: str = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "")
+    openai_base_url: str = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL", "")
     
     # Email settings (optional for MVP)
     email_provider: str = "sendgrid"
@@ -19,9 +21,9 @@ class Settings(BaseSettings):
     
     # API settings
     api_host: str = "0.0.0.0"
-    api_port: int = 8000
+    api_port: int = 5000
     
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 
 @lru_cache()

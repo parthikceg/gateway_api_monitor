@@ -3,6 +3,7 @@ from openai import OpenAI
 from typing import Dict, Any, Optional
 import json
 import logging
+import os
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -12,15 +13,23 @@ class AIAnalyzer:
     """Uses AI to analyze and summarize API changes"""
     
     def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        # the newest OpenAI model is "gpt-5" which was released August 7, 2025.
+        # do not change this unless explicitly requested by the user
+        # This is using Replit's AI Integrations service
+        self.client = OpenAI(
+            api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
+            base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+        )
     
     async def analyze_change(self, change: Dict[str, Any]) -> Optional[str]:
         """Generate AI summary for a single change"""
         try:
             prompt = self._build_prompt(change)
             
+            # the newest OpenAI model is "gpt-5" which was released August 7, 2025.
+            # do not change this unless explicitly requested by the user
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-5",
                 messages=[
                     {
                         "role": "system",
@@ -31,8 +40,7 @@ class AIAnalyzer:
                         "content": prompt
                     }
                 ],
-                max_tokens=200,
-                temperature=0.3
+                max_completion_tokens=200
             )
             
             return response.choices[0].message.content.strip()

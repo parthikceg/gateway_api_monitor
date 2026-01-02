@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 venv/
 env/
+.pythonlibs/
 
 # Environment
 .env
@@ -20,3 +21,8 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Replit
+.upm/
+.cache/
+.config/

@@ -570,3 +570,54 @@ async def debug_spec_types(db: Session = Depends(get_db)):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# ============================================================================
+# AI ENDPOINTS
+# ============================================================================
+
+from pydantic import BaseModel
+from typing import Any
+import os
+from openai import OpenAI
+
+class AIQuestion(BaseModel):
+    question: str
+    context: dict[str, Any]
+
+@app.post("/ai/ask")
+async def ask_ai(request: AIQuestion):
+    """Ask AI about a field or API change"""
+    try:
+        client = OpenAI(
+            api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
+            base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+        )
+        
+        context_str = f"""
+Field Details:
+- Name: {request.context.get('field', {}).get('name', 'Unknown')}
+- Type: {request.context.get('field', {}).get('type', 'Unknown')}
+- Description: {request.context.get('field', {}).get('description', 'No description')}
+- Required: {request.context.get('field', {}).get('required', False)}
+"""
+        
+        response = client.chat.completions.create(
+            model="gpt-5",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert on payment gateway APIs, specifically Stripe. Help users understand API fields, their usage, and impact on integrations like Chargebee. Be concise and practical."
+                },
+                {
+                    "role": "user",
+                    "content": f"{context_str}\n\nQuestion: {request.question}"
+                }
+            ],
+            max_completion_tokens=500
+        )
+        
+        return {"answer": response.choices[0].message.content}
+    except Exception as e:
+        logger.error(f"AI query failed: {e}")
+        return {"answer": f"Sorry, I couldn't process your question. Error: {str(e)}"}

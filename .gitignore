@@ -26,3 +26,9 @@ Thumbs.db
 .upm/
 .cache/
 .config/
+
+# Node.js
+node_modules/
+dist/
+.npm
+*.tgz

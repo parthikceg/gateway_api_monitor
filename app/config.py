@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     
     # API settings
     api_host: str = "0.0.0.0"
-    api_port: int = 5000
+    api_port: int = 8000
     
     model_config = {"env_file": ".env", "extra": "ignore"}
 

@@ -1,55 +1,70 @@
-# Gateway Monitor API
+# Gateway Monitor - Stripe API Change Tracker
 
 ## Overview
-This is a FastAPI-based application that monitors Stripe API changes automatically across multiple tiers (stable, preview, beta). It uses OpenAI for AI-powered change analysis and PostgreSQL for data persistence.
+A professional full-stack application to monitor Stripe API changes across multiple tiers (stable, preview, beta). The system captures API snapshots, detects changes, provides AI-powered analysis, and offers a comprehensive web dashboard.
 
-## Project Structure
-```
-app/
-├── main.py              # FastAPI application entry point with all endpoints
-├── config.py            # Application configuration using pydantic-settings
-├── db/
-│   └── database.py      # SQLAlchemy database configuration
-├── models/
-│   └── models.py        # SQLAlchemy models (Snapshot, Change, AlertSubscription)
-├── services/
-│   ├── ai_analyzer.py   # OpenAI-powered change analysis
-│   ├── diff_engine.py   # Schema difference detection
-│   ├── monitoring_service.py  # Main monitoring orchestration
-│   └── stripe_crawler.py      # Stripe API specification crawler
-└── scheduler/
-    └── scheduler.py     # APScheduler for periodic monitoring
-```
+## Project Architecture
 
-## Key Technologies
-- **FastAPI**: Web framework for the REST API
-- **SQLAlchemy**: ORM for PostgreSQL database
-- **OpenAI**: AI-powered change analysis (using Replit AI Integrations)
-- **APScheduler**: Background job scheduling for monitoring tasks
-- **PostgreSQL**: Database for storing snapshots and changes
+### Backend (Python/FastAPI)
+- **Location**: `app/`
+- **Port**: 8000 (localhost)
+- **Framework**: FastAPI with SQLAlchemy ORM
+- **Database**: PostgreSQL (Replit-managed)
+- **AI**: OpenAI integration via Replit AI Integrations (gpt-5 model)
 
-## Environment Variables
-- `DATABASE_URL`: PostgreSQL connection string (auto-provided by Replit)
-- `AI_INTEGRATIONS_OPENAI_API_KEY`: OpenAI API key (auto-provided by Replit AI Integrations)
-- `AI_INTEGRATIONS_OPENAI_BASE_URL`: OpenAI base URL (auto-provided by Replit AI Integrations)
+Key files:
+- `app/main.py` - Main FastAPI application with all endpoints
+- `app/config.py` - Configuration settings
+- `app/db/` - Database models and connection
+- `app/services/` - Business logic services
+
+### Frontend (React/Vite)
+- **Location**: `client/`
+- **Port**: 5000 (0.0.0.0 for webview)
+- **Framework**: React + Vite + Tailwind CSS
+- **UI Components**: shadcn/ui
+
+Key files:
+- `client/src/App.tsx` - Main app with routing
+- `client/src/components/Layout.tsx` - Dashboard layout
+- `client/src/pages/` - All dashboard pages
+- `client/src/lib/api.ts` - API client
+- `client/vite.config.ts` - Vite config with proxy
+
+### Pages
+1. **Dashboard** - Overview stats, recent changes, API coverage
+2. **Changes** - Filterable change history with severity badges
+3. **Object Explorer** - Field hierarchy browser with "Ask AI" feature
+4. **Snapshots** - View all captured API snapshots
+5. **Compare** - Compare tiers (beta→stable, preview→stable, etc.)
 
 ## API Endpoints
-- `GET /`: Health check endpoint
-- `POST /monitor/run`: Trigger monitoring for all tiers or specific tier
-- `GET /monitor/compare`: Compare two tiers to see upcoming features
-- `GET /snapshots`: Get recent snapshots
-- `GET /changes`: Get recent changes with filtering
-- `GET /changes/pipeline`: Get complete feature pipeline
-- `POST /subscriptions`: Subscribe to email alerts
+
+### Core
+- `GET /` - Health check
+- `GET /changes` - List changes (with filters)
+- `GET /snapshots` - List snapshots
+- `GET /snapshots/{id}` - Get snapshot detail
+- `GET /snapshots/stats` - Snapshot statistics
+- `POST /monitor/run` - Trigger monitoring
+- `GET /monitor/compare` - Compare tiers
+- `POST /ai/ask` - AI-powered field insights
 
 ## Running the Application
-The application runs on port 5000 using uvicorn:
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 5000
-```
+
+### Development
+Two workflows run simultaneously:
+1. **Backend API**: `uvicorn app.main:app --host localhost --port 8000`
+2. **Frontend**: `cd client && npm run dev` (port 5000)
+
+Frontend proxies `/api` requests to backend via Vite config.
+
+## Technology Stack
+- Python 3.11, FastAPI, SQLAlchemy, APScheduler
+- React 19, Vite, Tailwind CSS v4, shadcn/ui
+- PostgreSQL, OpenAI (via Replit AI Integrations)
 
 ## Recent Changes
-- 2026-01-02: Imported from GitHub and configured for Replit environment
-- Updated OpenAI integration to use Replit AI Integrations (gpt-5)
-- Configured PostgreSQL database
-- Set up workflow to run on port 5000
+- 2026-01-02: Rebuilt frontend with professional dashboard UI
+- 2026-01-02: Added AI-powered "Ask AI" feature for field insights
+- 2026-01-02: Separated frontend/backend into dual workflow setup

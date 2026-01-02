@@ -481,7 +481,7 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
     new_snapshot = Snapshot(
         endpoint_path="/v1/payment_intents",
         gateway="stripe",
-        spec_type="openapi3",
+        spec_type=SpecType.STABLE,
         schema_data=schema
     )
     

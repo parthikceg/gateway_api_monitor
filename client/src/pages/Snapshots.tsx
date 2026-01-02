@@ -102,12 +102,12 @@ export function Snapshots() {
       </div>
 
       <div className="flex items-center gap-4">
-        <Select value={tierFilter} onValueChange={setTierFilter}>
+        <Select value={tierFilter || "all"} onValueChange={(value) => setTierFilter(value === "all" ? "" : value)}>
           <SelectTrigger className="w-[180px]">
             <SelectValue placeholder="Filter by tier" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All Tiers</SelectItem>
+            <SelectItem value="all">All Tiers</SelectItem>
             <SelectItem value="stable">Stable</SelectItem>
             <SelectItem value="preview">Preview</SelectItem>
             <SelectItem value="beta">Beta</SelectItem>

@@ -79,12 +79,12 @@ export function Changes() {
             <span className="text-sm font-medium">Filters:</span>
           </div>
           
-          <Select value={filters.severity} onValueChange={(value) => setFilters(f => ({ ...f, severity: value }))}>
+          <Select value={filters.severity || "all"} onValueChange={(value) => setFilters(f => ({ ...f, severity: value === "all" ? "" : value }))}>
             <SelectTrigger className="w-[140px]">
               <SelectValue placeholder="Severity" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Severities</SelectItem>
+              <SelectItem value="all">All Severities</SelectItem>
               <SelectItem value="high">High</SelectItem>
               <SelectItem value="medium">Medium</SelectItem>
               <SelectItem value="low">Low</SelectItem>
@@ -92,12 +92,12 @@ export function Changes() {
             </SelectContent>
           </Select>
 
-          <Select value={filters.tier} onValueChange={(value) => setFilters(f => ({ ...f, tier: value }))}>
+          <Select value={filters.tier || "all"} onValueChange={(value) => setFilters(f => ({ ...f, tier: value === "all" ? "" : value }))}>
             <SelectTrigger className="w-[130px]">
               <SelectValue placeholder="Tier" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Tiers</SelectItem>
+              <SelectItem value="all">All Tiers</SelectItem>
               <SelectItem value="stable">Stable</SelectItem>
               <SelectItem value="preview">Preview</SelectItem>
               <SelectItem value="beta">Beta</SelectItem>

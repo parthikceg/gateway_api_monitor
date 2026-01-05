@@ -36,15 +36,6 @@ export function Compare() {
     }
   }
 
-  const getTierVariant = (tier: string) => {
-    switch (tier.toLowerCase()) {
-      case 'stable': return 'stable'
-      case 'preview': return 'preview'
-      case 'beta': return 'beta'
-      default: return 'secondary'
-    }
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -52,7 +43,7 @@ export function Compare() {
         <p className="text-muted-foreground">Compare API versions across different tiers</p>
       </div>
 
-      <Card>
+      <Card className="stat-card card-hover">
         <CardHeader>
           <CardTitle>Compare Tiers</CardTitle>
           <CardDescription>
@@ -60,8 +51,8 @@ export function Compare() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex-1 min-w-[150px]">
               <label className="text-sm font-medium mb-2 block">Source Tier</label>
               <Select value={source} onValueChange={setSource}>
                 <SelectTrigger>
@@ -76,7 +67,7 @@ export function Compare() {
 
             <ArrowRight className="h-5 w-5 text-muted-foreground mt-6" />
 
-            <div className="flex-1">
+            <div className="flex-1 min-w-[150px]">
               <label className="text-sm font-medium mb-2 block">Target Tier</label>
               <Select value={target} onValueChange={setTarget}>
                 <SelectTrigger>
@@ -89,7 +80,11 @@ export function Compare() {
               </Select>
             </div>
 
-            <Button onClick={handleCompare} disabled={loading} className="mt-6">
+            <Button 
+              onClick={handleCompare} 
+              disabled={loading} 
+              className="mt-6 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
+            >
               {loading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -107,34 +102,43 @@ export function Compare() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => { setSource('preview'); setTarget('stable'); handleCompare() }}>
+        <Card 
+          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all" 
+          onClick={() => { setSource('preview'); setTarget('stable'); handleCompare() }}
+        >
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <Badge variant="preview">Preview</Badge>
-              <ArrowRight className="h-4 w-4" />
-              <Badge variant="stable">Stable</Badge>
+              <span className="badge-preview px-2 py-0.5 rounded-full text-xs font-semibold">Preview</span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <span className="badge-stable px-2 py-0.5 rounded-full text-xs font-semibold">Stable</span>
             </CardTitle>
             <CardDescription>See what's coming to GA soon</CardDescription>
           </CardHeader>
         </Card>
 
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => { setSource('beta'); setTarget('stable'); handleCompare() }}>
+        <Card 
+          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all" 
+          onClick={() => { setSource('beta'); setTarget('stable'); handleCompare() }}
+        >
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <Badge variant="beta">Beta</Badge>
-              <ArrowRight className="h-4 w-4" />
-              <Badge variant="stable">Stable</Badge>
+              <span className="badge-beta px-2 py-0.5 rounded-full text-xs font-semibold">Beta</span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <span className="badge-stable px-2 py-0.5 rounded-full text-xs font-semibold">Stable</span>
             </CardTitle>
             <CardDescription>Experimental features vs GA</CardDescription>
           </CardHeader>
         </Card>
 
-        <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => { setSource('beta'); setTarget('preview'); handleCompare() }}>
+        <Card 
+          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all" 
+          onClick={() => { setSource('beta'); setTarget('preview'); handleCompare() }}
+        >
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <Badge variant="beta">Beta</Badge>
-              <ArrowRight className="h-4 w-4" />
-              <Badge variant="preview">Preview</Badge>
+              <span className="badge-beta px-2 py-0.5 rounded-full text-xs font-semibold">Beta</span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+              <span className="badge-preview px-2 py-0.5 rounded-full text-xs font-semibold">Preview</span>
             </CardTitle>
             <CardDescription>What's graduating from beta</CardDescription>
           </CardHeader>
@@ -142,17 +146,17 @@ export function Compare() {
       </div>
 
       {result && (
-        <Card>
+        <Card className="card-hover">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               Comparison Results
-              <Badge variant={getTierVariant(result.source) as 'stable' | 'preview' | 'beta'} className="capitalize">
+              <span className={`badge-${result.source} px-2 py-0.5 rounded-full text-xs font-semibold capitalize`}>
                 {result.source}
-              </Badge>
+              </span>
               <ArrowRight className="h-4 w-4" />
-              <Badge variant={getTierVariant(result.target) as 'stable' | 'preview' | 'beta'} className="capitalize">
+              <span className={`badge-${result.target} px-2 py-0.5 rounded-full text-xs font-semibold capitalize`}>
                 {result.target}
-              </Badge>
+              </span>
             </CardTitle>
             <CardDescription>
               {result.upcoming_features_count} upcoming features found
@@ -168,19 +172,19 @@ export function Compare() {
             ) : (
               <div className="space-y-3">
                 {result.changes.map((change, idx) => (
-                  <div key={idx} className="p-3 border rounded-lg">
+                  <div key={idx} className="p-4 border rounded-xl bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors">
                     <div className="flex items-center gap-2 mb-2">
-                      <Badge variant="outline" className="capitalize">
+                      <Badge variant="outline" className="capitalize bg-background">
                         {change.type.replace(/_/g, ' ')}
                       </Badge>
-                      <span className="font-mono text-sm">{change.field}</span>
+                      <span className="font-mono text-sm font-medium">{change.field}</span>
                     </div>
                     {(change.old_value !== undefined || change.new_value !== undefined) && (
                       <div className="flex gap-4 text-sm">
                         {change.old_value !== undefined && (
                           <div className="flex-1">
                             <span className="text-muted-foreground">Old: </span>
-                            <code className="bg-red-50 text-red-700 px-1 rounded">
+                            <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
                               {JSON.stringify(change.old_value)}
                             </code>
                           </div>
@@ -188,7 +192,7 @@ export function Compare() {
                         {change.new_value !== undefined && (
                           <div className="flex-1">
                             <span className="text-muted-foreground">New: </span>
-                            <code className="bg-green-50 text-green-700 px-1 rounded">
+                            <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
                               {JSON.stringify(change.new_value)}
                             </code>
                           </div>

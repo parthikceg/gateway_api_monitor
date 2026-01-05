@@ -8,14 +8,28 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Change } from '@/lib/api'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 
-export function Changes() {
+interface ChangesProps {
+  initialSeverity?: string
+  initialTier?: string
+}
+
+export function Changes({ initialSeverity, initialTier }: ChangesProps) {
   const [changes, setChanges] = useState<Change[]>([])
   const [loading, setLoading] = useState(true)
   const [filters, setFilters] = useState({
-    severity: '',
-    tier: '',
+    severity: initialSeverity || '',
+    tier: initialTier || '',
     limit: 50,
   })
+
+  useEffect(() => {
+    if (initialSeverity) {
+      setFilters(f => ({ ...f, severity: initialSeverity }))
+    }
+    if (initialTier) {
+      setFilters(f => ({ ...f, tier: initialTier }))
+    }
+  }, [initialSeverity, initialTier])
 
   useEffect(() => {
     loadChanges()
@@ -68,12 +82,16 @@ export function Changes() {
       </div>
 
       <Tabs defaultValue="recent">
-        <TabsList>
-          <TabsTrigger value="recent">Recent (90 days)</TabsTrigger>
-          <TabsTrigger value="all">All Changes</TabsTrigger>
+        <TabsList className="bg-muted/50">
+          <TabsTrigger value="recent" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            Recent (90 days)
+          </TabsTrigger>
+          <TabsTrigger value="all" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            All Changes
+          </TabsTrigger>
         </TabsList>
 
-        <div className="flex gap-4 mt-4">
+        <div className="flex gap-4 mt-4 flex-wrap">
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">Filters:</span>
@@ -141,7 +159,7 @@ function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: Ch
 
   if (changes.length === 0) {
     return (
-      <Card>
+      <Card className="card-hover">
         <CardContent className="flex flex-col items-center justify-center h-64">
           <Sparkles className="h-12 w-12 text-muted-foreground mb-4" />
           <p className="text-lg font-medium">No changes found</p>
@@ -154,11 +172,11 @@ function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: Ch
   return (
     <div className="space-y-3">
       {changes.map((change) => (
-        <Card key={change.id}>
+        <Card key={change.id} className="card-hover">
           <CardHeader className="pb-3">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-2">
-                <span className="flex items-center justify-center w-6 h-6 rounded bg-muted font-mono text-xs">
+                <span className="flex items-center justify-center w-7 h-7 rounded-lg bg-gradient-to-br from-primary/10 to-purple-500/10 font-mono text-sm font-bold text-primary">
                   {getChangeIcon(change.type)}
                 </span>
                 <div>
@@ -170,9 +188,9 @@ function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: Ch
                 <Badge variant={getSeverityVariant(change.severity) as 'high' | 'medium' | 'low' | 'info'} className="capitalize">
                   {change.severity}
                 </Badge>
-                <Badge variant={change.tier as 'stable' | 'preview' | 'beta'} className="capitalize">
+                <span className={`badge-${change.tier} px-2.5 py-1 rounded-full text-xs font-semibold capitalize`}>
                   {change.tier}
-                </Badge>
+                </span>
               </div>
             </div>
           </CardHeader>

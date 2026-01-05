@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, ChevronDown, MessageSquare, Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, MessageSquare, Sparkles } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { ChatWidget } from '@/components/ChatWidget'
 import { api, type Snapshot } from '@/lib/api'
+import { cn } from '@/lib/utils'
 
 interface Field {
   name: string
@@ -15,16 +16,33 @@ interface Field {
   required?: boolean
   deprecated?: boolean
   children?: Field[]
+  availability?: 'stable' | 'preview' | 'beta' | 'all'
 }
 
-export function Explorer() {
+interface ExplorerProps {
+  initialTier?: string
+}
+
+export function Explorer({ initialTier }: ExplorerProps) {
   const [snapshots, setSnapshots] = useState<{ stable?: Snapshot; preview?: Snapshot; beta?: Snapshot }>({})
   const [loading, setLoading] = useState(true)
-  const [selectedField, setSelectedField] = useState<Field | null>(null)
-  const [aiDialogOpen, setAiDialogOpen] = useState(false)
-  const [aiQuestion, setAiQuestion] = useState('')
-  const [aiAnswer, setAiAnswer] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
+  const [activeTier, setActiveTier] = useState(initialTier || 'stable')
+  const [chatField, setChatField] = useState<{
+    name: string
+    type: string
+    description?: string
+    tier?: string
+  } | null>(null)
+  const [fieldAvailability, setFieldAvailability] = useState<{
+    beta_only: string[]
+    preview_only: string[]
+  }>({ beta_only: [], preview_only: [] })
+
+  useEffect(() => {
+    if (initialTier) {
+      setActiveTier(initialTier)
+    }
+  }, [initialTier])
 
   useEffect(() => {
     loadSnapshots()
@@ -51,11 +69,26 @@ export function Explorer() {
       }
 
       setSnapshots(snapshots)
+
+      const stableFields = new Set(parseSchemaFieldNames(snapshots.stable?.schema_data))
+      const previewFields = new Set(parseSchemaFieldNames(snapshots.preview?.schema_data))
+      const betaFields = new Set(parseSchemaFieldNames(snapshots.beta?.schema_data))
+
+      const betaOnly = [...betaFields].filter(f => !stableFields.has(f) && !previewFields.has(f))
+      const previewOnly = [...previewFields].filter(f => !stableFields.has(f))
+
+      setFieldAvailability({ beta_only: betaOnly, preview_only: previewOnly })
     } catch (error) {
       console.error('Failed to load snapshots:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  function parseSchemaFieldNames(schema: Record<string, unknown> | undefined): string[] {
+    if (!schema) return []
+    const properties = (schema.properties || schema) as Record<string, unknown>
+    return Object.keys(properties)
   }
 
   function parseSchemaToFields(schema: Record<string, unknown> | undefined): Field[] {
@@ -66,6 +99,14 @@ export function Explorer() {
     
     return Object.entries(properties).map(([name, value]) => {
       const fieldDef = value as Record<string, unknown>
+      let availability: Field['availability'] = 'all'
+      
+      if (fieldAvailability.beta_only.includes(name)) {
+        availability = 'beta'
+      } else if (fieldAvailability.preview_only.includes(name)) {
+        availability = 'preview'
+      }
+
       return {
         name,
         type: (fieldDef.type as string) || 'object',
@@ -73,22 +114,9 @@ export function Explorer() {
         required: required.includes(name),
         deprecated: fieldDef.deprecated as boolean | undefined,
         children: fieldDef.properties ? parseSchemaToFields(fieldDef as Record<string, unknown>) : undefined,
+        availability,
       }
     })
-  }
-
-  async function handleAskAI() {
-    if (!selectedField || !aiQuestion.trim()) return
-    
-    setAiLoading(true)
-    try {
-      const res = await api.askAI(aiQuestion, { field: selectedField })
-      setAiAnswer(res.answer)
-    } catch (error) {
-      setAiAnswer('Sorry, I was unable to process your question. Please try again.')
-    } finally {
-      setAiLoading(false)
-    }
   }
 
   const stableFields = parseSchemaToFields(snapshots.stable?.schema_data)
@@ -110,18 +138,29 @@ export function Explorer() {
         <p className="text-muted-foreground">Explore the full structure of monitored API objects</p>
       </div>
 
-      <Tabs defaultValue="stable">
-        <TabsList>
-          <TabsTrigger value="stable">
-            <Badge variant="stable" className="mr-2">GA</Badge>
+      <div className="flex gap-4 flex-wrap">
+        <div className="flex items-center gap-2 text-sm">
+          <div className="w-3 h-3 rounded field-beta-only" />
+          <span className="text-muted-foreground">Beta Only</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <div className="w-3 h-3 rounded field-preview-only" />
+          <span className="text-muted-foreground">Preview Only</span>
+        </div>
+      </div>
+
+      <Tabs value={activeTier} onValueChange={setActiveTier}>
+        <TabsList className="bg-muted/50">
+          <TabsTrigger value="stable" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <span className="badge-stable px-2 py-0.5 rounded-full text-xs font-semibold mr-2">GA</span>
             Stable ({stableFields.length} fields)
           </TabsTrigger>
-          <TabsTrigger value="preview">
-            <Badge variant="preview" className="mr-2">Preview</Badge>
+          <TabsTrigger value="preview" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <span className="badge-preview px-2 py-0.5 rounded-full text-xs font-semibold mr-2">Preview</span>
             Preview ({previewFields.length} fields)
           </TabsTrigger>
-          <TabsTrigger value="beta">
-            <Badge variant="beta" className="mr-2">Beta</Badge>
+          <TabsTrigger value="beta" className="data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <span className="badge-beta px-2 py-0.5 rounded-full text-xs font-semibold mr-2">Beta</span>
             Beta ({betaFields.length} fields)
           </TabsTrigger>
         </TabsList>
@@ -130,12 +169,8 @@ export function Explorer() {
           <FieldExplorer 
             fields={stableFields} 
             tier="stable"
-            onAskAI={(field) => {
-              setSelectedField(field)
-              setAiDialogOpen(true)
-              setAiAnswer('')
-              setAiQuestion('')
-            }}
+            fieldAvailability={fieldAvailability}
+            onAskAI={(field) => setChatField({ ...field, tier: 'stable' })}
           />
         </TabsContent>
         
@@ -143,12 +178,8 @@ export function Explorer() {
           <FieldExplorer 
             fields={previewFields} 
             tier="preview"
-            onAskAI={(field) => {
-              setSelectedField(field)
-              setAiDialogOpen(true)
-              setAiAnswer('')
-              setAiQuestion('')
-            }}
+            fieldAvailability={fieldAvailability}
+            onAskAI={(field) => setChatField({ ...field, tier: 'preview' })}
           />
         </TabsContent>
         
@@ -156,76 +187,16 @@ export function Explorer() {
           <FieldExplorer 
             fields={betaFields} 
             tier="beta"
-            onAskAI={(field) => {
-              setSelectedField(field)
-              setAiDialogOpen(true)
-              setAiAnswer('')
-              setAiQuestion('')
-            }}
+            fieldAvailability={fieldAvailability}
+            onAskAI={(field) => setChatField({ ...field, tier: 'beta' })}
           />
         </TabsContent>
       </Tabs>
 
-      <Dialog open={aiDialogOpen} onOpenChange={setAiDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
-              Ask AI about "{selectedField?.name}"
-            </DialogTitle>
-            <DialogDescription>
-              Get AI-powered insights about this field and its impact on your integrations.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm font-medium mb-2">Field Details</p>
-              <div className="p-3 bg-muted rounded-lg text-sm">
-                <p><span className="font-medium">Name:</span> {selectedField?.name}</p>
-                <p><span className="font-medium">Type:</span> {selectedField?.type}</p>
-                {selectedField?.description && (
-                  <p><span className="font-medium">Description:</span> {selectedField?.description}</p>
-                )}
-              </div>
-            </div>
-
-            <div>
-              <label className="text-sm font-medium">Your Question</label>
-              <textarea
-                className="w-full mt-1 p-3 border rounded-lg text-sm resize-none"
-                rows={3}
-                placeholder="e.g., What is this field used for? How does it impact Chargebee integrations?"
-                value={aiQuestion}
-                onChange={(e) => setAiQuestion(e.target.value)}
-              />
-            </div>
-
-            <div className="flex gap-2">
-              <Button onClick={handleAskAI} disabled={aiLoading || !aiQuestion.trim()}>
-                {aiLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Analyzing...
-                  </>
-                ) : (
-                  'Ask AI'
-                )}
-              </Button>
-              <Button variant="outline" onClick={() => setAiQuestion("What is this field used for?")}>
-                Suggest Question
-              </Button>
-            </div>
-
-            {aiAnswer && (
-              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
-                <p className="text-sm font-medium mb-2">AI Response</p>
-                <p className="text-sm">{aiAnswer}</p>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ChatWidget 
+        fieldContext={chatField} 
+        onClose={() => setChatField(null)}
+      />
     </div>
   )
 }
@@ -233,10 +204,11 @@ export function Explorer() {
 interface FieldExplorerProps {
   fields: Field[]
   tier: string
-  onAskAI: (field: Field) => void
+  fieldAvailability: { beta_only: string[]; preview_only: string[] }
+  onAskAI: (field: { name: string; type: string; description?: string }) => void
 }
 
-function FieldExplorer({ fields, tier, onAskAI }: FieldExplorerProps) {
+function FieldExplorer({ fields, tier, fieldAvailability, onAskAI }: FieldExplorerProps) {
   if (fields.length === 0) {
     return (
       <Card>
@@ -249,7 +221,7 @@ function FieldExplorer({ fields, tier, onAskAI }: FieldExplorerProps) {
   }
 
   return (
-    <Card>
+    <Card className="card-hover">
       <CardHeader>
         <CardTitle>Payment Intents</CardTitle>
         <CardDescription>Stripe API object structure for {tier} tier</CardDescription>
@@ -258,7 +230,13 @@ function FieldExplorer({ fields, tier, onAskAI }: FieldExplorerProps) {
         <ScrollArea className="h-[500px]">
           <div className="space-y-1">
             {fields.map((field) => (
-              <FieldRow key={field.name} field={field} depth={0} onAskAI={onAskAI} />
+              <FieldRow 
+                key={field.name} 
+                field={field} 
+                depth={0} 
+                fieldAvailability={fieldAvailability}
+                onAskAI={onAskAI} 
+              />
             ))}
           </div>
         </ScrollArea>
@@ -270,29 +248,38 @@ function FieldExplorer({ fields, tier, onAskAI }: FieldExplorerProps) {
 interface FieldRowProps {
   field: Field
   depth: number
-  onAskAI: (field: Field) => void
+  fieldAvailability: { beta_only: string[]; preview_only: string[] }
+  onAskAI: (field: { name: string; type: string; description?: string }) => void
 }
 
-function FieldRow({ field, depth, onAskAI }: FieldRowProps) {
+function FieldRow({ field, depth, fieldAvailability, onAskAI }: FieldRowProps) {
   const [expanded, setExpanded] = useState(false)
   const hasChildren = field.children && field.children.length > 0
+  
+  const isBetaOnly = fieldAvailability.beta_only.includes(field.name)
+  const isPreviewOnly = fieldAvailability.preview_only.includes(field.name)
 
   return (
     <div>
       <div
-        className={`flex items-center gap-2 p-2 rounded hover:bg-muted/50 cursor-pointer group`}
+        className={cn(
+          "flex items-center gap-2 p-2.5 rounded-lg cursor-pointer group transition-all",
+          isBetaOnly && "field-beta-only",
+          isPreviewOnly && "field-preview-only",
+          !isBetaOnly && !isPreviewOnly && "hover:bg-muted/50"
+        )}
         style={{ paddingLeft: `${depth * 20 + 8}px` }}
         onClick={() => hasChildren && setExpanded(!expanded)}
       >
         {hasChildren ? (
-          expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />
+          expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />
         ) : (
           <div className="w-4" />
         )}
         
         <span className="font-mono text-sm font-medium">{field.name}</span>
         
-        <Badge variant="outline" className="text-xs">
+        <Badge variant="outline" className="text-xs bg-background">
           {field.type}
         </Badge>
         
@@ -304,18 +291,26 @@ function FieldRow({ field, depth, onAskAI }: FieldRowProps) {
           <Badge variant="secondary" className="text-xs line-through">deprecated</Badge>
         )}
 
+        {isBetaOnly && (
+          <span className="badge-beta px-1.5 py-0.5 rounded text-xs font-medium">Beta Only</span>
+        )}
+
+        {isPreviewOnly && (
+          <span className="badge-preview px-1.5 py-0.5 rounded text-xs font-medium">Preview Only</span>
+        )}
+
         <div className="flex-1" />
 
         <Button
           variant="ghost"
           size="sm"
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
+          className="opacity-0 group-hover:opacity-100 transition-opacity gap-1.5 text-primary hover:text-primary"
           onClick={(e) => {
             e.stopPropagation()
-            onAskAI(field)
+            onAskAI({ name: field.name, type: field.type, description: field.description })
           }}
         >
-          <MessageSquare className="h-3 w-3 mr-1" />
+          <Sparkles className="h-3 w-3" />
           Ask AI
         </Button>
       </div>
@@ -332,7 +327,13 @@ function FieldRow({ field, depth, onAskAI }: FieldRowProps) {
       {expanded && hasChildren && (
         <div>
           {field.children!.map((child) => (
-            <FieldRow key={child.name} field={child} depth={depth + 1} onAskAI={onAskAI} />
+            <FieldRow 
+              key={child.name} 
+              field={child} 
+              depth={depth + 1} 
+              fieldAvailability={fieldAvailability}
+              onAskAI={onAskAI} 
+            />
           ))}
         </div>
       )}

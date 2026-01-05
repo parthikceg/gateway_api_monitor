@@ -585,6 +585,23 @@ class AIQuestion(BaseModel):
     question: str
     context: dict[str, Any]
 
+PAYMENTS_SME_SYSTEM_PROMPT = """You are a Senior Payments Expert and Subject Matter Expert (SME) on payment gateway APIs, with deep expertise in Stripe's API architecture, payment flows, and integration patterns.
+
+Your knowledge includes:
+1. **Stripe API Documentation**: Complete understanding of all Stripe API endpoints, objects, and their fields
+2. **Payment Concepts**: Authorization holds, capture methods, payment intents, payment methods, refunds, disputes, etc.
+3. **Integration Patterns**: Best practices for integrating payment gateways like Stripe with billing platforms like Chargebee
+4. **Business Use Cases**: Real-world applications of payment features in e-commerce, SaaS subscriptions, marketplaces, etc.
+
+When explaining a field or feature:
+- Explain what the field does in plain language
+- Describe the business use cases where this field is valuable
+- Provide examples of how payment platforms like Chargebee might use this field
+- Mention any important considerations, limitations, or best practices
+- If it's a beta/preview feature, explain what new capabilities it enables
+
+Keep responses concise but informative. Use bullet points for clarity. Focus on practical value for developers and product teams building payment integrations."""
+
 @app.post("/ai/ask")
 async def ask_ai(request: AIQuestion):
     """Ask AI about a field or API change"""
@@ -594,30 +611,90 @@ async def ask_ai(request: AIQuestion):
             base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
         )
         
+        field_info = request.context.get('field', {})
+        tier = field_info.get('tier', 'stable')
+        
         context_str = f"""
-Field Details:
-- Name: {request.context.get('field', {}).get('name', 'Unknown')}
-- Type: {request.context.get('field', {}).get('type', 'Unknown')}
-- Description: {request.context.get('field', {}).get('description', 'No description')}
-- Required: {request.context.get('field', {}).get('required', False)}
+**Field Being Discussed:**
+- Field Name: `{field_info.get('name', 'Unknown')}`
+- Data Type: {field_info.get('type', 'Unknown')}
+- API Tier: {tier.upper()} {'(Generally Available)' if tier == 'stable' else '(Not yet in GA - subject to change)'}
+- Description from Stripe: {field_info.get('description', 'No description available')}
+- Required: {'Yes' if field_info.get('required') else 'No'}
 """
+        
+        messages = [
+            {"role": "system", "content": PAYMENTS_SME_SYSTEM_PROMPT}
+        ]
+        
+        conversation_history = request.context.get('conversationHistory', [])
+        for msg in conversation_history[-6:]:
+            messages.append({"role": msg.get('role', 'user'), "content": msg.get('content', '')})
+        
+        messages.append({"role": "user", "content": f"{context_str}\n\n**User Question:** {request.question}"})
         
         response = client.chat.completions.create(
             model="gpt-5",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are an expert on payment gateway APIs, specifically Stripe. Help users understand API fields, their usage, and impact on integrations like Chargebee. Be concise and practical."
-                },
-                {
-                    "role": "user",
-                    "content": f"{context_str}\n\nQuestion: {request.question}"
-                }
-            ],
-            max_completion_tokens=500
+            messages=messages,
+            max_completion_tokens=800
         )
         
         return {"answer": response.choices[0].message.content}
     except Exception as e:
         logger.error(f"AI query failed: {e}")
         return {"answer": f"Sorry, I couldn't process your question. Error: {str(e)}"}
+
+
+# ============================================================================
+# SUBSCRIPTION ENDPOINTS
+# ============================================================================
+
+from app.models.models import AlertSubscription
+
+class SubscribeRequest(BaseModel):
+    name: str
+    email: str
+
+@app.post("/subscribe")
+async def subscribe(request: SubscribeRequest, db: Session = Depends(get_db)):
+    """Subscribe to API change alerts"""
+    try:
+        existing = db.query(AlertSubscription).filter(AlertSubscription.email == request.email).first()
+        
+        if existing:
+            existing.name = request.name
+            existing.is_active = True
+            db.commit()
+            return {"status": "success", "message": "Subscription updated successfully"}
+        
+        subscription = AlertSubscription(
+            name=request.name,
+            email=request.email,
+            is_active=True
+        )
+        db.add(subscription)
+        db.commit()
+        
+        logger.info(f"New subscription: {request.email}")
+        return {"status": "success", "message": "Subscribed successfully"}
+    except Exception as e:
+        logger.error(f"Subscription failed: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to subscribe")
+
+@app.get("/subscribers")
+async def list_subscribers(db: Session = Depends(get_db)):
+    """List all active subscribers (admin only)"""
+    subscribers = db.query(AlertSubscription).filter(AlertSubscription.is_active == True).all()
+    return {
+        "subscribers": [
+            {
+                "id": str(s.id),
+                "name": s.name,
+                "email": s.email,
+                "created_at": s.created_at.isoformat()
+            }
+            for s in subscribers
+        ],
+        "count": len(subscribers)
+    }

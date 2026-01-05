@@ -57,6 +57,7 @@ class AlertSubscription(Base):
     __tablename__ = "alert_subscriptions"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
     email = Column(String, nullable=False, unique=True)
     gateway = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)

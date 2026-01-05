@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Database, RefreshCw } from 'lucide-react'
+import { Database, RefreshCw, X, Calendar, Tag, ExternalLink } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { api, type Snapshot } from '@/lib/api'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 
@@ -13,6 +15,8 @@ export function Snapshots() {
   const [loading, setLoading] = useState(true)
   const [tierFilter, setTierFilter] = useState('')
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -50,6 +54,18 @@ export function Snapshots() {
     }
   }
 
+  async function handleViewSnapshot(snapshot: Snapshot) {
+    setDetailLoading(true)
+    try {
+      const detail = await api.getSnapshotDetail(snapshot.id)
+      setSelectedSnapshot(detail)
+    } catch (error) {
+      console.error('Failed to load snapshot detail:', error)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
   const getTierVariant = (tier: string) => {
     switch (tier.toLowerCase()) {
       case 'stable': return 'stable'
@@ -74,7 +90,11 @@ export function Snapshots() {
           <h2 className="text-2xl font-bold">Snapshots</h2>
           <p className="text-muted-foreground">View all captured API snapshots</p>
         </div>
-        <Button onClick={handleRefresh} disabled={isRefreshing}>
+        <Button 
+          onClick={handleRefresh} 
+          disabled={isRefreshing}
+          className="bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
+        >
           <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin' : ''}`} />
           Capture New Snapshot
         </Button>
@@ -84,17 +104,17 @@ export function Snapshots() {
         {['stable', 'preview', 'beta'].map((tier) => {
           const stat = stats.find(s => s.tier.toLowerCase() === tier)
           return (
-            <Card key={tier}>
+            <Card key={tier} className="stat-card card-hover">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
-                  <Badge variant={getTierVariant(tier) as 'stable' | 'preview' | 'beta'} className="capitalize">
+                  <span className={`badge-${tier} px-2 py-0.5 rounded-full text-xs font-semibold capitalize`}>
                     {tier}
-                  </Badge>
+                  </span>
                   Snapshots
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stat?.count || 0}</div>
+                <div className="text-3xl font-bold">{stat?.count || 0}</div>
               </CardContent>
             </Card>
           )
@@ -132,32 +152,111 @@ export function Snapshots() {
       ) : (
         <div className="space-y-3">
           {snapshots.map((snapshot) => (
-            <Card key={snapshot.id}>
+            <Card 
+              key={snapshot.id} 
+              className="card-hover cursor-pointer transition-all"
+              onClick={() => handleViewSnapshot(snapshot)}
+            >
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between">
                   <div>
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Database className="h-4 w-4" />
+                      <Database className="h-4 w-4 text-primary" />
                       {snapshot.endpoint}
                     </CardTitle>
                     <CardDescription>{snapshot.gateway}</CardDescription>
                   </div>
-                  <Badge variant={getTierVariant(snapshot.tier) as 'stable' | 'preview' | 'beta'} className="capitalize">
+                  <span className={`badge-${snapshot.tier.toLowerCase()} px-2.5 py-1 rounded-full text-xs font-semibold capitalize`}>
                     {snapshot.tier}
-                  </Badge>
+                  </span>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
                 <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span>Captured: {formatDate(snapshot.created_at)}</span>
+                  <span className="flex items-center gap-1">
+                    <Calendar className="h-3.5 w-3.5" />
+                    {formatDate(snapshot.created_at)}
+                  </span>
                   <span>{formatRelativeTime(snapshot.created_at)}</span>
-                  <span className="font-mono text-xs">{snapshot.id.slice(0, 8)}...</span>
+                  <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">{snapshot.id.slice(0, 8)}...</span>
                 </div>
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      <Dialog open={!!selectedSnapshot} onOpenChange={() => setSelectedSnapshot(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-primary" />
+              Snapshot Details
+            </DialogTitle>
+            <DialogDescription>
+              Full captured API object data
+            </DialogDescription>
+          </DialogHeader>
+
+          {detailLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          ) : selectedSnapshot && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-3 rounded-lg bg-muted/50">
+                  <p className="text-xs text-muted-foreground mb-1">Endpoint</p>
+                  <p className="font-medium">{selectedSnapshot.endpoint}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-muted/50">
+                  <p className="text-xs text-muted-foreground mb-1">Gateway</p>
+                  <p className="font-medium">{selectedSnapshot.gateway}</p>
+                </div>
+                <div className="p-3 rounded-lg bg-muted/50">
+                  <p className="text-xs text-muted-foreground mb-1">Tier</p>
+                  <span className={`badge-${selectedSnapshot.tier.toLowerCase()} px-2.5 py-1 rounded-full text-xs font-semibold capitalize`}>
+                    {selectedSnapshot.tier}
+                  </span>
+                </div>
+                <div className="p-3 rounded-lg bg-muted/50">
+                  <p className="text-xs text-muted-foreground mb-1">Captured</p>
+                  <p className="font-medium">{formatDate(selectedSnapshot.created_at)}</p>
+                </div>
+              </div>
+
+              <div className="p-3 rounded-lg bg-muted/50">
+                <p className="text-xs text-muted-foreground mb-1">Snapshot ID</p>
+                <p className="font-mono text-sm">{selectedSnapshot.id}</p>
+              </div>
+
+              {selectedSnapshot.spec_url && (
+                <div className="p-3 rounded-lg bg-muted/50">
+                  <p className="text-xs text-muted-foreground mb-1">Spec URL</p>
+                  <a 
+                    href={selectedSnapshot.spec_url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline flex items-center gap-1"
+                  >
+                    {selectedSnapshot.spec_url}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              )}
+
+              <div>
+                <p className="text-sm font-medium mb-2">Schema Data</p>
+                <ScrollArea className="h-[300px] rounded-lg border bg-slate-950 p-4">
+                  <pre className="text-xs text-slate-100 font-mono">
+                    {JSON.stringify(selectedSnapshot.schema_data, null, 2)}
+                  </pre>
+                </ScrollArea>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

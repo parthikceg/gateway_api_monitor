@@ -91,4 +91,19 @@ export const api = {
       body: JSON.stringify({ question, context }),
     })
   },
+
+  subscribe: async (data: { name: string; email: string }) => {
+    return fetchApi<{ status: string; message: string }>('/subscribe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  getFieldAvailability: async () => {
+    return fetchApi<{ 
+      beta_only: string[]
+      preview_only: string[]
+      stable: string[]
+    }>('/fields/availability')
+  },
 }

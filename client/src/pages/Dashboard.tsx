@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, CheckCircle, Database, TrendingUp } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle, Database, TrendingUp, ArrowRight } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { api, type Change } from '@/lib/api'
 import { formatRelativeTime } from '@/lib/utils'
+
+interface DashboardProps {
+  onNavigate: (page: string, params?: Record<string, string>) => void
+}
 
 interface Stats {
   totalChanges: number
@@ -13,7 +17,7 @@ interface Stats {
   tiersMonitored: string[]
 }
 
-export function Dashboard() {
+export function Dashboard({ onNavigate }: DashboardProps) {
   const [stats, setStats] = useState<Stats>({
     totalChanges: 0,
     highSeverity: 0,
@@ -90,7 +94,11 @@ export function Dashboard() {
           <h2 className="text-2xl font-bold">Overview</h2>
           <p className="text-muted-foreground">Monitor Stripe API changes in real-time</p>
         </div>
-        <Button onClick={handleRunMonitoring} disabled={isRunning}>
+        <Button 
+          onClick={handleRunMonitoring} 
+          disabled={isRunning}
+          className="bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
+        >
           {isRunning ? (
             <>
               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
@@ -106,56 +114,89 @@ export function Dashboard() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card 
+          className="stat-card card-hover cursor-pointer group"
+          onClick={() => onNavigate('changes')}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Changes</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <TrendingUp className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.totalChanges}</div>
-            <p className="text-xs text-muted-foreground">Detected across all tiers</p>
+            <div className="text-3xl font-bold">{stats.totalChanges}</div>
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              Detected across all tiers
+              <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card 
+          className="stat-card card-hover cursor-pointer group"
+          onClick={() => onNavigate('changes', { severity: 'high' })}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">High Severity</CardTitle>
             <AlertTriangle className="h-4 w-4 text-red-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.highSeverity}</div>
-            <p className="text-xs text-muted-foreground">Breaking or critical changes</p>
+            <div className="text-3xl font-bold text-red-600">{stats.highSeverity}</div>
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              Breaking or critical changes
+              <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card 
+          className="stat-card card-hover cursor-pointer group"
+          onClick={() => onNavigate('snapshots')}
+        >
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Snapshots</CardTitle>
-            <Database className="h-4 w-4 text-muted-foreground" />
+            <Database className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{stats.recentSnapshots}</div>
-            <p className="text-xs text-muted-foreground">API snapshots captured</p>
+            <div className="text-3xl font-bold">{stats.recentSnapshots}</div>
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              API snapshots captured
+              <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="stat-card">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tiers Monitored</CardTitle>
             <CheckCircle className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="flex gap-1">
-              <Badge variant="stable">Stable</Badge>
-              <Badge variant="preview">Preview</Badge>
-              <Badge variant="beta">Beta</Badge>
+            <div className="flex gap-2 flex-wrap">
+              <button 
+                onClick={() => onNavigate('explorer', { tier: 'stable' })}
+                className="badge-stable px-2.5 py-1 rounded-full text-xs font-semibold transition-transform hover:scale-105"
+              >
+                Stable
+              </button>
+              <button 
+                onClick={() => onNavigate('explorer', { tier: 'preview' })}
+                className="badge-preview px-2.5 py-1 rounded-full text-xs font-semibold transition-transform hover:scale-105"
+              >
+                Preview
+              </button>
+              <button 
+                onClick={() => onNavigate('explorer', { tier: 'beta' })}
+                className="badge-beta px-2.5 py-1 rounded-full text-xs font-semibold transition-transform hover:scale-105"
+              >
+                Beta
+              </button>
             </div>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        <Card>
+        <Card className="card-hover">
           <CardHeader>
             <CardTitle>Recent Changes</CardTitle>
             <CardDescription>Latest API changes detected</CardDescription>
@@ -166,10 +207,14 @@ export function Dashboard() {
             ) : (
               <div className="space-y-3">
                 {recentChanges.map((change) => (
-                  <div key={change.id} className="flex items-start gap-3 p-3 rounded-lg border">
+                  <div 
+                    key={change.id} 
+                    className="flex items-start gap-3 p-3 rounded-xl border bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors cursor-pointer"
+                    onClick={() => onNavigate('changes', { tier: change.tier })}
+                  >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <Badge variant={getSeverityVariant(change.severity)} className="capitalize">
+                        <Badge variant={getSeverityVariant(change.severity) as 'high' | 'medium' | 'low' | 'info'} className="capitalize">
                           {change.severity}
                         </Badge>
                         <Badge variant={change.tier as 'stable' | 'preview' | 'beta'} className="capitalize">
@@ -189,28 +234,28 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="card-hover">
           <CardHeader>
             <CardTitle>API Coverage</CardTitle>
             <CardDescription>Currently monitored endpoints</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 rounded-lg border">
+              <div className="flex items-center justify-between p-3 rounded-xl border bg-gradient-to-r from-green-50/50 to-transparent">
                 <div>
                   <p className="font-medium">Payment Intents</p>
                   <p className="text-sm text-muted-foreground">Stripe</p>
                 </div>
-                <Badge variant="stable">Active</Badge>
+                <span className="badge-stable px-2.5 py-1 rounded-full text-xs font-semibold">Active</span>
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg border opacity-50">
+              <div className="flex items-center justify-between p-3 rounded-xl border opacity-50">
                 <div>
                   <p className="font-medium">Checkout Sessions</p>
                   <p className="text-sm text-muted-foreground">Stripe</p>
                 </div>
                 <Badge variant="secondary">Coming Soon</Badge>
               </div>
-              <div className="flex items-center justify-between p-3 rounded-lg border opacity-50">
+              <div className="flex items-center justify-between p-3 rounded-xl border opacity-50">
                 <div>
                   <p className="font-medium">Transactions</p>
                   <p className="text-sm text-muted-foreground">Braintree</p>

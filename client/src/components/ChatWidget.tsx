@@ -27,11 +27,13 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [currentContext, setCurrentContext] = useState<ChatWidgetProps['fieldContext']>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (fieldContext) {
       setIsOpen(true)
+      setCurrentContext(fieldContext)
       const welcomeMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
@@ -48,6 +50,18 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
     }
   }, [messages])
 
+  const openChatWithoutContext = () => {
+    setIsOpen(true)
+    setCurrentContext(null)
+    const welcomeMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `Hello! I'm your Stripe API Assistant - a Senior Payments Expert ready to help you understand:\n\n- **API fields and objects** - What each field does and when to use it\n- **Payment concepts** - Authorization holds, capture methods, payment intents, etc.\n- **Integration patterns** - Best practices for working with Stripe\n- **Business use cases** - How to use features for subscriptions, e-commerce, and more\n\nWhat would you like to know about Stripe's API?`,
+      timestamp: new Date(),
+    }
+    setMessages([welcomeMessage])
+  }
+
   const handleSend = async () => {
     if (!input.trim() || isLoading) return
 
@@ -59,12 +73,13 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
     }
 
     setMessages(prev => [...prev, userMessage])
+    const userInput = input
     setInput('')
     setIsLoading(true)
 
     try {
-      const response = await api.askAI(input, {
-        field: fieldContext || {},
+      const response = await api.askAI(userInput, {
+        field: currentContext || { name: 'General', type: 'general', description: 'General Stripe API question' },
         conversationHistory: messages.slice(-6).map(m => ({
           role: m.role,
           content: m.content
@@ -80,6 +95,7 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
 
       setMessages(prev => [...prev, assistantMessage])
     } catch (error) {
+      console.error('AI request failed:', error)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -95,13 +111,14 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
   const handleClose = () => {
     setIsOpen(false)
     setMessages([])
+    setCurrentContext(null)
     onClose?.()
   }
 
   if (!isOpen) {
     return (
       <button
-        onClick={() => setIsOpen(true)}
+        onClick={openChatWithoutContext}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-600 text-white shadow-lg transition-all hover:scale-105 hover:shadow-xl pulse-ring"
       >
         <MessageSquare className="h-6 w-6" />
@@ -116,7 +133,9 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
           <Sparkles className="h-5 w-5" />
           <div>
             <h3 className="font-semibold">AI Assistant</h3>
-            <p className="text-xs opacity-90">Stripe API Expert</p>
+            <p className="text-xs opacity-90">
+              {currentContext ? `Discussing: ${currentContext.name}` : 'Stripe API Expert'}
+            </p>
           </div>
         </div>
         <Button variant="ghost" size="icon" onClick={handleClose} className="text-white hover:bg-white/20">
@@ -169,7 +188,7 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about this field..."
+            placeholder={currentContext ? `Ask about ${currentContext.name}...` : 'Ask about Stripe API...'}
             className="flex-1 rounded-full border bg-background px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/50"
           />
           <Button

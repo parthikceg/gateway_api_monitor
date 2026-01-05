@@ -78,22 +78,28 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
     setIsLoading(true)
 
     try {
+      const contextToSend = currentContext || { name: 'General', type: 'general', description: 'General Stripe API question' }
+      const historyToSend = messages.slice(-6).map(m => ({
+        role: m.role,
+        content: m.content
+      }))
+      
       const response = await api.askAI(userInput, {
-        field: currentContext || { name: 'General', type: 'general', description: 'General Stripe API question' },
-        conversationHistory: messages.slice(-6).map(m => ({
-          role: m.role,
-          content: m.content
-        }))
+        field: contextToSend,
+        conversationHistory: historyToSend
       })
 
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: response.answer,
-        timestamp: new Date(),
+      if (response && response.answer) {
+        const assistantMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: response.answer,
+          timestamp: new Date(),
+        }
+        setMessages(prev => [...prev, assistantMessage])
+      } else {
+        throw new Error('No answer received')
       }
-
-      setMessages(prev => [...prev, assistantMessage])
     } catch (error) {
       console.error('AI request failed:', error)
       const errorMessage: Message = {
@@ -103,9 +109,8 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
         timestamp: new Date(),
       }
       setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setIsLoading(false)
     }
+    setIsLoading(false)
   }
 
   const handleClose = () => {

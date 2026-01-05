@@ -5,6 +5,7 @@ import { Changes } from '@/pages/Changes'
 import { Explorer } from '@/pages/Explorer'
 import { Snapshots } from '@/pages/Snapshots'
 import { Compare } from '@/pages/Compare'
+import { ChatWidget } from '@/components/ChatWidget'
 
 interface NavigationParams {
   tier?: string
@@ -38,9 +39,12 @@ function App() {
   }
 
   return (
-    <Layout currentPage={currentPage} onNavigate={handleNavigate}>
-      {renderPage()}
-    </Layout>
+    <>
+      <Layout currentPage={currentPage} onNavigate={handleNavigate}>
+        {renderPage()}
+      </Layout>
+      {currentPage !== 'explorer' && <ChatWidget />}
+    </>
   )
 }
 

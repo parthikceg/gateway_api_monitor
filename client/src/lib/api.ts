@@ -75,13 +75,6 @@ export const api = {
       `/monitor/compare?source=${source}&target=${target}`
     ),
   
-  getPipeline: () => fetchApi<{
-    pipeline: {
-      beta_experiments: { count: number; features: unknown[] }
-      preview_features: { count: number; features: unknown[]; estimated_timeline: string }
-    }
-  }>('/changes/pipeline'),
-  
   runMonitoring: (tier?: string) => 
     fetchApi<{ status: string; message?: string }>(`/monitor/run${tier ? `?tier=${tier}` : ''}`, { method: 'POST' }),
 

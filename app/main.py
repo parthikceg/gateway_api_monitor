@@ -10,7 +10,6 @@ from app.db.database import get_db, init_db
 from app.models.models import Snapshot, Change, AlertSubscription, SpecType, ChangeMaturity
 from app.services.monitoring_service import MonitoringService
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
-from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(
@@ -34,13 +33,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-pipeline_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 300  # 5 minutes cache
-}
-
 
 @app.on_event("startup")
 async def startup_event():
@@ -289,153 +281,6 @@ async def get_changes(
     }
 
 
-@app.get("/changes/upcoming")
-async def get_upcoming_features(
-    source_tier: str = "preview",
-    db: Session = Depends(get_db)
-):
-    """
-    Get upcoming features from preview/beta tiers
-    
-    Query params:
-    - source_tier: 'preview' or 'beta' (default: preview)
-    """
-    if source_tier not in ["preview", "beta"]:
-        raise HTTPException(status_code=400, detail="Source tier must be preview or beta")
-    
-    service = MonitoringService(db)
-    result = await service._compare_tiers(source_tier, "stable")
-    
-    return result
-
-
-@app.get("/changes/pipeline")
-async def get_feature_pipeline(db: Session = Depends(get_db)):
-    """Get complete feature pipeline with caching"""
-    
-    # Check cache
-    now = datetime.utcnow()
-    if (pipeline_cache["data"] is not None and 
-        pipeline_cache["timestamp"] is not None and
-        (now - pipeline_cache["timestamp"]).total_seconds() < pipeline_cache["ttl"]):
-        return pipeline_cache["data"]
-    
-    # Generate fresh data
-    service = MonitoringService(db)
-    beta_pipeline = await service._compare_tiers("beta", "stable")
-    preview_pipeline = await service._compare_tiers("preview", "stable")
-    
-    result = {
-        "pipeline": {
-            "beta_experiments": {
-                "count": beta_pipeline.get("upcoming_features_count", 0),
-                "features": beta_pipeline.get("changes", [])
-            },
-            "preview_features": {
-                "count": preview_pipeline.get("upcoming_features_count", 0),
-                "features": preview_pipeline.get("changes", []),
-                "estimated_timeline": "4-10 weeks to GA"
-            }
-        }
-    }
-    
-    # Update cache
-    pipeline_cache["data"] = result
-    pipeline_cache["timestamp"] = now
-    
-    return result
-
-
-# ============================================================================
-# SUBSCRIPTION ENDPOINTS
-# ============================================================================
-
-@app.post("/subscriptions")
-async def create_subscription(
-    email: str,
-    gateway: str = None,
-    db: Session = Depends(get_db)
-):
-    """Subscribe to email alerts"""
-    subscription = AlertSubscription(
-        email=email,
-        gateway=gateway
-    )
-    db.add(subscription)
-    db.commit()
-    db.refresh(subscription)
-    
-    return {
-        "id": str(subscription.id),
-        "email": email,
-        "status": "active"
-    }
-
-
-@app.get("/subscriptions")
-async def get_subscriptions(db: Session = Depends(get_db)):
-    """Get all active subscriptions"""
-    subscriptions = db.query(AlertSubscription) \
-        .filter(AlertSubscription.is_active == True) \
-        .all()
-    
-    return {
-        "subscriptions": [
-            {
-                "id": str(s.id),
-                "email": s.email,
-                "gateway": s.gateway
-            }
-            for s in subscriptions
-        ]
-    }
-
-
-# ============================================================================
-# TEST ENDPOINTS (Keep existing ones)
-# ============================================================================
-
-
-@app.post("/admin/migrate")
-async def run_migration():
-    """Run database migration for multi-tier support"""
-    from sqlalchemy import text
-    from app.db.database import engine
-    
-    try:
-        with engine.connect() as conn:
-            # Add spec_type column if not exists
-            conn.execute(text("""
-                ALTER TABLE snapshots 
-                ADD COLUMN IF NOT EXISTS spec_type VARCHAR DEFAULT 'STABLE'
-            """))
-            
-            # Add spec_url column
-            conn.execute(text("""
-                ALTER TABLE snapshots 
-                ADD COLUMN IF NOT EXISTS spec_url VARCHAR
-            """))
-            
-            # Add change_maturity column
-            conn.execute(text("""
-                ALTER TABLE changes 
-                ADD COLUMN IF NOT EXISTS change_maturity VARCHAR
-            """))
-            
-            # CRITICAL: Update old 'primary' values to 'stable'
-            conn.execute(text("""
-                UPDATE snapshots 
-                SET spec_type = 'STABLE' 
-                WHERE spec_type = 'primary' OR spec_type = 'openapi3'
-            """))
-            
-            conn.commit()
-        
-        return {"status": "success", "message": "Migration completed! Old data updated."}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-
 @app.post("/monitor/inject-test-snapshot")
 async def inject_test_snapshot(db: Session = Depends(get_db)):
     """Create a modified snapshot for testing change detection"""
@@ -503,73 +348,6 @@ async def inject_test_snapshot(db: Session = Depends(get_db)):
         ],
         "next_step": "Run POST /monitor/run to detect these changes"
     }
-
-
-@app.post("/monitor/debug-last-comparison")
-async def debug_last_comparison(db: Session = Depends(get_db)):
-    """See what the last monitoring run compared"""
-    snapshots = db.query(Snapshot).order_by(Snapshot.created_at.desc()).limit(2).all()
-    
-    if len(snapshots) < 2:
-        return {"error": "Need at least 2 snapshots"}
-    
-    latest = snapshots[0]
-    previous = snapshots[1]
-    
-    return {
-        "previous_snapshot": {
-            "id": str(previous.id),
-            "created_at": previous.created_at.isoformat(),
-            "has_new_test_field": "new_test_field" in previous.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {}),
-            "has_metadata": "metadata" in previous.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {})
-        },
-        "latest_snapshot": {
-            "id": str(latest.id),
-            "created_at": latest.created_at.isoformat(),
-            "has_new_test_field": "new_test_field" in latest.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {}),
-            "has_metadata": "metadata" in latest.schema_data.get("requestBody", {}).get("content", {}).get("application/x-www-form-urlencoded", {}).get("schema", {}).get("properties", {})
-        }
-    }
-
-
-@app.get("/monitor/debug-schema-structure")
-async def debug_schema_structure(db: Session = Depends(get_db)):
-    """See the actual structure of stored schemas"""
-    latest = db.query(Snapshot).order_by(Snapshot.created_at.desc()).first()
-    
-    if not latest:
-        return {"error": "No snapshots"}
-    
-    schema = latest.schema_data
-    
-    return {
-        "snapshot_id": str(latest.id),
-        "top_level_keys": list(schema.keys()),
-        "has_requestBody": "requestBody" in schema,
-        "has_properties_at_root": "properties" in schema,
-        "schema_preview": {
-            k: type(v).__name__ for k, v in list(schema.items())[:10]
-        }
-    }
-
-
-@app.get("/admin/debug-spec-types")
-async def debug_spec_types(db: Session = Depends(get_db)):
-    """Debug: Show all unique spec_type values in database"""
-    from sqlalchemy import text
-    from app.db.database import engine
-    
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT DISTINCT spec_type FROM snapshots"))
-            values = [row[0] for row in result]
-        
-        return {
-            "unique_spec_types": values,
-            "count": len(values)
-        }
-    except Exception as e:
-        return {"error": str(e)}
 
 
 # ============================================================================

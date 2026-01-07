@@ -51,21 +51,80 @@ Key files:
 
 ## API Endpoints
 
-### Core
-- `GET /` - Health check
-- `GET /changes` - List changes (with filters: severity, tier, maturity)
-- `GET /snapshots` - List snapshots (with filters: tier)
-- `GET /snapshots/{id}` - Get snapshot detail with schema data
-- `GET /snapshots/stats` - Snapshot statistics by tier
-- `POST /monitor/run` - Trigger monitoring
-- `GET /monitor/compare` - Compare tiers
+Access interactive API docs at `/api/docs` (Swagger UI) or `/api/redoc` (ReDoc).
 
-### AI
-- `POST /ai/ask` - AI-powered field insights (Payments SME)
+### Health Check
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | Returns service health status, version, and supported tiers |
+
+### Monitoring
+| Method | Endpoint | Description | When to Use |
+|--------|----------|-------------|-------------|
+| POST | `/monitor/run` | Trigger API monitoring for all tiers or a specific tier | Run manually to capture latest Stripe API specs and detect changes |
+| POST | `/monitor/run?tier=beta` | Monitor only the beta tier | When you need to refresh a specific tier's snapshot |
+| GET | `/monitor/compare` | Compare two tiers to see upcoming features | See what's in beta/preview that isn't yet in stable |
+
+**Compare endpoint query params:**
+- `source`: Required. Either `preview` or `beta`
+- `target`: Optional. Either `stable` or `preview` (default: `stable`)
+
+### Changes
+| Method | Endpoint | Description | When to Use |
+|--------|----------|-------------|-------------|
+| GET | `/changes` | List detected API changes with filtering | View change history, filter by severity/tier |
+
+**Query params:**
+- `limit`: Number of results (default: 20)
+- `severity`: Filter by `high`, `medium`, `low`, or `info`
+- `tier`: Filter by `stable`, `preview`, or `beta`
+- `maturity`: Filter by change maturity level
+
+### Snapshots
+| Method | Endpoint | Description | When to Use |
+|--------|----------|-------------|-------------|
+| GET | `/snapshots` | List captured API snapshots | View all historical snapshots |
+| GET | `/snapshots/{id}` | Get full snapshot details with JSON schema | Inspect complete API schema for a snapshot |
+| GET | `/snapshots/stats` | Get snapshot counts by tier | Dashboard statistics |
+
+**Query params for list:**
+- `limit`: Number of results (default: 10)
+- `tier`: Filter by `stable`, `preview`, or `beta`
+
+### AI Assistant
+| Method | Endpoint | Description | When to Use |
+|--------|----------|-------------|-------------|
+| POST | `/ai/ask` | Ask the AI about API fields or changes | Get expert explanations of Stripe API concepts |
+
+**Request body:**
+```json
+{
+  "question": "What is this field used for?",
+  "context": {
+    "field": { "name": "amount", "type": "integer", "tier": "stable" },
+    "conversationHistory": []
+  }
+}
+```
 
 ### Subscriptions
-- `POST /subscribe` - Subscribe to alerts (name, email)
-- `GET /subscribers` - List all active subscribers
+| Method | Endpoint | Description | When to Use |
+|--------|----------|-------------|-------------|
+| POST | `/subscribe` | Subscribe to API change alerts | Register email for notifications |
+| GET | `/subscribers` | List all active subscribers | Admin view of subscriptions |
+
+**Request body for subscribe:**
+```json
+{
+  "name": "John Doe",
+  "email": "john@example.com"
+}
+```
+
+### Testing (Development Only)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/monitor/inject-test-snapshot` | Create a modified snapshot for testing change detection |
 
 ## Running the Application
 
@@ -85,6 +144,8 @@ Frontend proxies `/api` requests to backend via Vite config.
 - **Email Notifications**: To send email alerts to subscribers, set up Resend or SendGrid integration. The subscription data is stored in `alert_subscriptions` table.
 
 ## Recent Changes
+- 2026-01-07: Removed 8 unused API endpoints (debug endpoints, duplicates, unused features)
+- 2026-01-07: Updated API documentation with comprehensive endpoint reference
 - 2026-01-05: Modernized UI with gradient backgrounds, improved colors, card hover effects
 - 2026-01-05: Added floating AI chat widget (Intercom-style)
 - 2026-01-05: Made Dashboard stats clickable with filtered navigation

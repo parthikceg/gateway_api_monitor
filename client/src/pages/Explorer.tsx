@@ -17,6 +17,8 @@ interface Field {
   deprecated?: boolean
   children?: Field[]
   availability?: 'stable' | 'preview' | 'beta' | 'all'
+  enumValues?: string[]
+  newEnumValues?: string[]
 }
 
 interface ExplorerProps {
@@ -36,7 +38,8 @@ export function Explorer({ initialTier }: ExplorerProps) {
   const [fieldAvailability, setFieldAvailability] = useState<{
     beta_only: string[]
     preview_only: string[]
-  }>({ beta_only: [], preview_only: [] })
+    enum_diff: Record<string, { beta_new: string[]; preview_new: string[] }>
+  }>({ beta_only: [], preview_only: [], enum_diff: {} })
 
   useEffect(() => {
     if (initialTier) {
@@ -77,7 +80,27 @@ export function Explorer({ initialTier }: ExplorerProps) {
       const betaOnly = [...betaFields].filter(f => !stableFields.has(f) && !previewFields.has(f))
       const previewOnly = [...previewFields].filter(f => !stableFields.has(f))
 
-      setFieldAvailability({ beta_only: betaOnly, preview_only: previewOnly })
+      const stableEnums = parseSchemaEnumValues(snapshots.stable?.schema_data)
+      const previewEnums = parseSchemaEnumValues(snapshots.preview?.schema_data)
+      const betaEnums = parseSchemaEnumValues(snapshots.beta?.schema_data)
+      
+      const enumDiff: Record<string, { beta_new: string[]; preview_new: string[] }> = {}
+      
+      const allFieldNames = new Set([...Object.keys(stableEnums), ...Object.keys(previewEnums), ...Object.keys(betaEnums)])
+      allFieldNames.forEach(fieldName => {
+        const stableVals = new Set(stableEnums[fieldName] || [])
+        const previewVals = previewEnums[fieldName] || []
+        const betaVals = betaEnums[fieldName] || []
+        
+        const previewNew = previewVals.filter(v => !stableVals.has(v))
+        const betaNew = betaVals.filter(v => !stableVals.has(v))
+        
+        if (previewNew.length > 0 || betaNew.length > 0) {
+          enumDiff[fieldName] = { beta_new: betaNew, preview_new: previewNew }
+        }
+      })
+
+      setFieldAvailability({ beta_only: betaOnly, preview_only: previewOnly, enum_diff: enumDiff })
     } catch (error) {
       console.error('Failed to load snapshots:', error)
     } finally {
@@ -91,7 +114,36 @@ export function Explorer({ initialTier }: ExplorerProps) {
     return Object.keys(properties)
   }
 
-  function parseSchemaToFields(schema: Record<string, unknown> | undefined): Field[] {
+  function parseSchemaEnumValues(schema: Record<string, unknown> | undefined, prefix: string = ''): Record<string, string[]> {
+    if (!schema) return {}
+    const properties = (schema.properties || schema) as Record<string, unknown>
+    const result: Record<string, string[]> = {}
+    
+    Object.entries(properties).forEach(([name, value]) => {
+      const fieldDef = value as Record<string, unknown>
+      const fieldPath = prefix ? `${prefix}.${name}` : name
+      
+      if (fieldDef.enum && Array.isArray(fieldDef.enum)) {
+        result[fieldPath] = fieldDef.enum as string[]
+      }
+      if (fieldDef.items && typeof fieldDef.items === 'object') {
+        const items = fieldDef.items as Record<string, unknown>
+        if (items.enum && Array.isArray(items.enum)) {
+          result[fieldPath] = items.enum as string[]
+        }
+        if (items.properties) {
+          Object.assign(result, parseSchemaEnumValues(items as Record<string, unknown>, fieldPath))
+        }
+      }
+      if (fieldDef.properties) {
+        Object.assign(result, parseSchemaEnumValues(fieldDef as Record<string, unknown>, fieldPath))
+      }
+    })
+    
+    return result
+  }
+
+  function parseSchemaToFields(schema: Record<string, unknown> | undefined, tier: string = 'stable'): Field[] {
     if (!schema) return []
     
     const properties = (schema.properties || schema) as Record<string, unknown>
@@ -107,21 +159,43 @@ export function Explorer({ initialTier }: ExplorerProps) {
         availability = 'preview'
       }
 
+      let enumValues: string[] | undefined
+      if (fieldDef.enum && Array.isArray(fieldDef.enum)) {
+        enumValues = fieldDef.enum as string[]
+      } else if (fieldDef.items && typeof fieldDef.items === 'object') {
+        const items = fieldDef.items as Record<string, unknown>
+        if (items.enum && Array.isArray(items.enum)) {
+          enumValues = items.enum as string[]
+        }
+      }
+
+      let newEnumValues: string[] | undefined
+      const diff = fieldAvailability.enum_diff[name]
+      if (diff) {
+        if (tier === 'beta' && diff.beta_new.length > 0) {
+          newEnumValues = diff.beta_new
+        } else if (tier === 'preview' && diff.preview_new.length > 0) {
+          newEnumValues = diff.preview_new
+        }
+      }
+
       return {
         name,
         type: (fieldDef.type as string) || 'object',
         description: fieldDef.description as string | undefined,
         required: required.includes(name),
         deprecated: fieldDef.deprecated as boolean | undefined,
-        children: fieldDef.properties ? parseSchemaToFields(fieldDef as Record<string, unknown>) : undefined,
+        children: fieldDef.properties ? parseSchemaToFields(fieldDef as Record<string, unknown>, tier) : undefined,
         availability,
+        enumValues,
+        newEnumValues,
       }
     })
   }
 
-  const stableFields = parseSchemaToFields(snapshots.stable?.schema_data)
-  const previewFields = parseSchemaToFields(snapshots.preview?.schema_data)
-  const betaFields = parseSchemaToFields(snapshots.beta?.schema_data)
+  const stableFields = parseSchemaToFields(snapshots.stable?.schema_data, 'stable')
+  const previewFields = parseSchemaToFields(snapshots.preview?.schema_data, 'preview')
+  const betaFields = parseSchemaToFields(snapshots.beta?.schema_data, 'beta')
 
   if (loading) {
     return (
@@ -146,6 +220,10 @@ export function Explorer({ initialTier }: ExplorerProps) {
         <div className="flex items-center gap-2 text-sm">
           <div className="w-3 h-3 rounded field-preview-only" />
           <span className="text-muted-foreground">Preview Only</span>
+        </div>
+        <div className="flex items-center gap-2 text-sm">
+          <div className="w-3 h-3 rounded bg-gradient-to-r from-amber-100 to-orange-100 border border-orange-200" />
+          <span className="text-muted-foreground">Has New Values</span>
         </div>
       </div>
 
@@ -299,6 +377,12 @@ function FieldRow({ field, depth, fieldAvailability, onAskAI }: FieldRowProps) {
           <span className="badge-preview px-1.5 py-0.5 rounded text-xs font-medium">Preview Only</span>
         )}
 
+        {field.newEnumValues && field.newEnumValues.length > 0 && (
+          <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-gradient-to-r from-amber-100 to-orange-100 text-orange-700 border border-orange-200">
+            {field.newEnumValues.length} new value{field.newEnumValues.length > 1 ? 's' : ''}
+          </span>
+        )}
+
         <div className="flex-1" />
 
         <Button
@@ -322,6 +406,25 @@ function FieldRow({ field, depth, fieldAvailability, onAskAI }: FieldRowProps) {
         >
           {field.description}
         </p>
+      )}
+
+      {field.newEnumValues && field.newEnumValues.length > 0 && (
+        <div 
+          className="text-xs pb-2"
+          style={{ paddingLeft: `${depth * 20 + 32}px` }}
+        >
+          <span className="text-muted-foreground">New values: </span>
+          <span className="flex flex-wrap gap-1 mt-1">
+            {field.newEnumValues.map((val) => (
+              <span 
+                key={val} 
+                className="inline-flex px-2 py-0.5 rounded bg-gradient-to-r from-amber-50 to-orange-50 text-orange-700 border border-orange-200 font-mono text-xs"
+              >
+                {val}
+              </span>
+            ))}
+          </span>
+        </div>
       )}
 
       {expanded && hasChildren && (

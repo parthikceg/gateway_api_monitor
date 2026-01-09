@@ -187,8 +187,8 @@ export function Snapshots() {
       )}
 
       <Dialog open={!!selectedSnapshot} onOpenChange={() => setSelectedSnapshot(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh]">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Database className="h-5 w-5 text-primary" />
               Snapshot Details
@@ -203,8 +203,8 @@ export function Snapshots() {
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
           ) : selectedSnapshot && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col min-h-0 flex-1 space-y-4">
+              <div className="flex-shrink-0 grid grid-cols-2 gap-4">
                 <div className="p-3 rounded-lg bg-muted/50">
                   <p className="text-xs text-muted-foreground mb-1">Endpoint</p>
                   <p className="font-medium">{selectedSnapshot.endpoint}</p>
@@ -225,13 +225,13 @@ export function Snapshots() {
                 </div>
               </div>
 
-              <div className="p-3 rounded-lg bg-muted/50">
+              <div className="flex-shrink-0 p-3 rounded-lg bg-muted/50">
                 <p className="text-xs text-muted-foreground mb-1">Snapshot ID</p>
                 <p className="font-mono text-sm">{selectedSnapshot.id}</p>
               </div>
 
               {selectedSnapshot.spec_url && (
-                <div className="p-3 rounded-lg bg-muted/50">
+                <div className="flex-shrink-0 p-3 rounded-lg bg-muted/50">
                   <p className="text-xs text-muted-foreground mb-1">Spec URL</p>
                   <a 
                     href={selectedSnapshot.spec_url} 
@@ -245,13 +245,15 @@ export function Snapshots() {
                 </div>
               )}
 
-              <div>
-                <p className="text-sm font-medium mb-2">Schema Data</p>
-                <ScrollArea className="h-[300px] rounded-lg border bg-slate-950 p-4">
-                  <pre className="text-xs text-slate-100 font-mono">
-                    {JSON.stringify(selectedSnapshot.schema_data, null, 2)}
-                  </pre>
-                </ScrollArea>
+              <div className="flex-1 min-h-0 flex flex-col">
+                <p className="flex-shrink-0 text-sm font-medium mb-2">Schema Data</p>
+                <div className="flex-1 min-h-0 rounded-lg border bg-slate-950 overflow-hidden">
+                  <div className="h-full overflow-auto p-4">
+                    <pre className="text-xs text-slate-100 font-mono whitespace-pre">
+                      {JSON.stringify(selectedSnapshot.schema_data, null, 2)}
+                    </pre>
+                  </div>
+                </div>
               </div>
             </div>
           )}

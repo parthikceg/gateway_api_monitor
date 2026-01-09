@@ -108,10 +108,28 @@ export function Explorer({ initialTier }: ExplorerProps) {
     }
   }
 
-  function parseSchemaFieldNames(schema: Record<string, unknown> | undefined): string[] {
+  function parseSchemaFieldNames(schema: Record<string, unknown> | undefined, prefix: string = ''): string[] {
     if (!schema) return []
     const properties = (schema.properties || schema) as Record<string, unknown>
-    return Object.keys(properties)
+    const result: string[] = []
+    
+    Object.entries(properties).forEach(([name, value]) => {
+      const fieldPath = prefix ? `${prefix}.${name}` : name
+      result.push(fieldPath)
+      
+      const fieldDef = value as Record<string, unknown>
+      if (fieldDef.properties) {
+        result.push(...parseSchemaFieldNames(fieldDef as Record<string, unknown>, fieldPath))
+      }
+      if (fieldDef.items && typeof fieldDef.items === 'object') {
+        const items = fieldDef.items as Record<string, unknown>
+        if (items.properties) {
+          result.push(...parseSchemaFieldNames(items as Record<string, unknown>, fieldPath))
+        }
+      }
+    })
+    
+    return result
   }
 
   function parseSchemaEnumValues(schema: Record<string, unknown> | undefined, prefix: string = ''): Record<string, string[]> {
@@ -143,7 +161,7 @@ export function Explorer({ initialTier }: ExplorerProps) {
     return result
   }
 
-  function parseSchemaToFields(schema: Record<string, unknown> | undefined, tier: string = 'stable'): Field[] {
+  function parseSchemaToFields(schema: Record<string, unknown> | undefined, tier: string = 'stable', prefix: string = ''): Field[] {
     if (!schema) return []
     
     const properties = (schema.properties || schema) as Record<string, unknown>
@@ -151,11 +169,12 @@ export function Explorer({ initialTier }: ExplorerProps) {
     
     return Object.entries(properties).map(([name, value]) => {
       const fieldDef = value as Record<string, unknown>
+      const fieldPath = prefix ? `${prefix}.${name}` : name
       let availability: Field['availability'] = 'all'
       
-      if (fieldAvailability.beta_only.includes(name)) {
+      if (fieldAvailability.beta_only.includes(fieldPath)) {
         availability = 'beta'
-      } else if (fieldAvailability.preview_only.includes(name)) {
+      } else if (fieldAvailability.preview_only.includes(fieldPath)) {
         availability = 'preview'
       }
 
@@ -170,12 +189,22 @@ export function Explorer({ initialTier }: ExplorerProps) {
       }
 
       let newEnumValues: string[] | undefined
-      const diff = fieldAvailability.enum_diff[name]
+      const diff = fieldAvailability.enum_diff[fieldPath]
       if (diff) {
         if (tier === 'beta' && diff.beta_new.length > 0) {
           newEnumValues = diff.beta_new
         } else if (tier === 'preview' && diff.preview_new.length > 0) {
           newEnumValues = diff.preview_new
+        }
+      }
+
+      let children: Field[] | undefined
+      if (fieldDef.properties) {
+        children = parseSchemaToFields(fieldDef as Record<string, unknown>, tier, fieldPath)
+      } else if (fieldDef.items && typeof fieldDef.items === 'object') {
+        const items = fieldDef.items as Record<string, unknown>
+        if (items.properties) {
+          children = parseSchemaToFields(items as Record<string, unknown>, tier, fieldPath)
         }
       }
 
@@ -185,7 +214,7 @@ export function Explorer({ initialTier }: ExplorerProps) {
         description: fieldDef.description as string | undefined,
         required: required.includes(name),
         deprecated: fieldDef.deprecated as boolean | undefined,
-        children: fieldDef.properties ? parseSchemaToFields(fieldDef as Record<string, unknown>, tier) : undefined,
+        children,
         availability,
         enumValues,
         newEnumValues,
@@ -311,7 +340,8 @@ function FieldExplorer({ fields, tier, fieldAvailability, onAskAI }: FieldExplor
               <FieldRow 
                 key={field.name} 
                 field={field} 
-                depth={0} 
+                depth={0}
+                fieldPath={field.name}
                 fieldAvailability={fieldAvailability}
                 onAskAI={onAskAI} 
               />
@@ -326,16 +356,20 @@ function FieldExplorer({ fields, tier, fieldAvailability, onAskAI }: FieldExplor
 interface FieldRowProps {
   field: Field
   depth: number
+  fieldPath: string
   fieldAvailability: { beta_only: string[]; preview_only: string[] }
   onAskAI: (field: { name: string; type: string; description?: string }) => void
 }
 
-function FieldRow({ field, depth, fieldAvailability, onAskAI }: FieldRowProps) {
+function FieldRow({ field, depth, fieldPath, fieldAvailability, onAskAI }: FieldRowProps) {
   const [expanded, setExpanded] = useState(false)
+  const [showAllEnums, setShowAllEnums] = useState(false)
   const hasChildren = field.children && field.children.length > 0
   
-  const isBetaOnly = fieldAvailability.beta_only.includes(field.name)
-  const isPreviewOnly = fieldAvailability.preview_only.includes(field.name)
+  const isBetaOnly = fieldAvailability.beta_only.includes(fieldPath)
+  const isPreviewOnly = fieldAvailability.preview_only.includes(fieldPath)
+  const hasEnumValues = field.enumValues && field.enumValues.length > 0
+  const newValuesSet = new Set(field.newEnumValues || [])
 
   return (
     <div>
@@ -408,22 +442,48 @@ function FieldRow({ field, depth, fieldAvailability, onAskAI }: FieldRowProps) {
         </p>
       )}
 
-      {field.newEnumValues && field.newEnumValues.length > 0 && (
+      {hasEnumValues && (
         <div 
           className="text-xs pb-2"
           style={{ paddingLeft: `${depth * 20 + 32}px` }}
         >
-          <span className="text-muted-foreground">New values: </span>
-          <span className="flex flex-wrap gap-1 mt-1">
-            {field.newEnumValues.map((val) => (
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-muted-foreground">
+              Possible values ({field.enumValues!.length}):
+            </span>
+            {field.enumValues!.length > 10 && (
+              <button
+                onClick={() => setShowAllEnums(!showAllEnums)}
+                className="text-primary hover:underline text-xs"
+              >
+                {showAllEnums ? 'Show less' : 'Show all'}
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(showAllEnums ? field.enumValues! : field.enumValues!.slice(0, 10)).map((val) => (
               <span 
                 key={val} 
-                className="inline-flex px-2 py-0.5 rounded bg-gradient-to-r from-amber-50 to-orange-50 text-orange-700 border border-orange-200 font-mono text-xs"
+                className={cn(
+                  "inline-flex px-2 py-0.5 rounded font-mono text-xs",
+                  newValuesSet.has(val)
+                    ? "bg-gradient-to-r from-amber-50 to-orange-50 text-orange-700 border border-orange-200"
+                    : "bg-muted/50 text-muted-foreground border border-muted"
+                )}
               >
                 {val}
+                {newValuesSet.has(val) && <span className="ml-1 text-orange-500">*</span>}
               </span>
             ))}
-          </span>
+            {!showAllEnums && field.enumValues!.length > 10 && (
+              <span className="text-muted-foreground px-2 py-0.5">
+                +{field.enumValues!.length - 10} more
+              </span>
+            )}
+          </div>
+          {field.newEnumValues && field.newEnumValues.length > 0 && (
+            <p className="text-orange-600 mt-1 text-xs">* New in this tier</p>
+          )}
         </div>
       )}
 
@@ -433,7 +493,8 @@ function FieldRow({ field, depth, fieldAvailability, onAskAI }: FieldRowProps) {
             <FieldRow 
               key={child.name} 
               field={child} 
-              depth={depth + 1} 
+              depth={depth + 1}
+              fieldPath={fieldPath ? `${fieldPath}.${child.name}` : child.name}
               fieldAvailability={fieldAvailability}
               onAskAI={onAskAI} 
             />

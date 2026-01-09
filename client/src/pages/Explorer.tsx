@@ -108,9 +108,32 @@ export function Explorer({ initialTier }: ExplorerProps) {
     }
   }
 
+  function resolveSchemaObject(fieldDef: Record<string, unknown>): Record<string, unknown> | undefined {
+    if (fieldDef.properties) {
+      return fieldDef
+    }
+    const compositionKeys = ['anyOf', 'oneOf', 'allOf'] as const
+    for (const key of compositionKeys) {
+      const arr = fieldDef[key]
+      if (Array.isArray(arr)) {
+        for (const variant of arr) {
+          if (typeof variant === 'object' && variant !== null) {
+            const resolved = resolveSchemaObject(variant as Record<string, unknown>)
+            if (resolved) return resolved
+          }
+        }
+      }
+    }
+    if (fieldDef.items && typeof fieldDef.items === 'object') {
+      return resolveSchemaObject(fieldDef.items as Record<string, unknown>)
+    }
+    return undefined
+  }
+
   function parseSchemaFieldNames(schema: Record<string, unknown> | undefined, prefix: string = ''): string[] {
     if (!schema) return []
-    const properties = (schema.properties || schema) as Record<string, unknown>
+    const resolved = resolveSchemaObject(schema) || schema
+    const properties = (resolved.properties || resolved) as Record<string, unknown>
     const result: string[] = []
     
     Object.entries(properties).forEach(([name, value]) => {
@@ -118,14 +141,9 @@ export function Explorer({ initialTier }: ExplorerProps) {
       result.push(fieldPath)
       
       const fieldDef = value as Record<string, unknown>
-      if (fieldDef.properties) {
-        result.push(...parseSchemaFieldNames(fieldDef as Record<string, unknown>, fieldPath))
-      }
-      if (fieldDef.items && typeof fieldDef.items === 'object') {
-        const items = fieldDef.items as Record<string, unknown>
-        if (items.properties) {
-          result.push(...parseSchemaFieldNames(items as Record<string, unknown>, fieldPath))
-        }
+      const nestedSchema = resolveSchemaObject(fieldDef)
+      if (nestedSchema) {
+        result.push(...parseSchemaFieldNames(nestedSchema, fieldPath))
       }
     })
     
@@ -134,7 +152,8 @@ export function Explorer({ initialTier }: ExplorerProps) {
 
   function parseSchemaEnumValues(schema: Record<string, unknown> | undefined, prefix: string = ''): Record<string, string[]> {
     if (!schema) return {}
-    const properties = (schema.properties || schema) as Record<string, unknown>
+    const resolved = resolveSchemaObject(schema) || schema
+    const properties = (resolved.properties || resolved) as Record<string, unknown>
     const result: Record<string, string[]> = {}
     
     Object.entries(properties).forEach(([name, value]) => {
@@ -149,12 +168,10 @@ export function Explorer({ initialTier }: ExplorerProps) {
         if (items.enum && Array.isArray(items.enum)) {
           result[fieldPath] = items.enum as string[]
         }
-        if (items.properties) {
-          Object.assign(result, parseSchemaEnumValues(items as Record<string, unknown>, fieldPath))
-        }
       }
-      if (fieldDef.properties) {
-        Object.assign(result, parseSchemaEnumValues(fieldDef as Record<string, unknown>, fieldPath))
+      const nestedSchema = resolveSchemaObject(fieldDef)
+      if (nestedSchema) {
+        Object.assign(result, parseSchemaEnumValues(nestedSchema, fieldPath))
       }
     })
     
@@ -164,8 +181,9 @@ export function Explorer({ initialTier }: ExplorerProps) {
   function parseSchemaToFields(schema: Record<string, unknown> | undefined, tier: string = 'stable', prefix: string = ''): Field[] {
     if (!schema) return []
     
-    const properties = (schema.properties || schema) as Record<string, unknown>
-    const required = (schema.required || []) as string[]
+    const resolved = resolveSchemaObject(schema) || schema
+    const properties = (resolved.properties || resolved) as Record<string, unknown>
+    const required = (resolved.required || []) as string[]
     
     return Object.entries(properties).map(([name, value]) => {
       const fieldDef = value as Record<string, unknown>
@@ -199,13 +217,9 @@ export function Explorer({ initialTier }: ExplorerProps) {
       }
 
       let children: Field[] | undefined
-      if (fieldDef.properties) {
-        children = parseSchemaToFields(fieldDef as Record<string, unknown>, tier, fieldPath)
-      } else if (fieldDef.items && typeof fieldDef.items === 'object') {
-        const items = fieldDef.items as Record<string, unknown>
-        if (items.properties) {
-          children = parseSchemaToFields(items as Record<string, unknown>, tier, fieldPath)
-        }
+      const nestedSchema = resolveSchemaObject(fieldDef)
+      if (nestedSchema) {
+        children = parseSchemaToFields(nestedSchema, tier, fieldPath)
       }
 
       return {

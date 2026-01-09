@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
 import logging
+import json
 
 from app.services.stripe_crawler import StripeCrawler
 from app.services.diff_engine import DiffEngine
@@ -76,12 +77,23 @@ class MonitoringService:
                 ai_summary = await self.ai_analyzer.analyze_change(change_data)
                 category = await self.ai_analyzer.categorize_change(change_data)
                 
+                old_val = change_data.get("old_value")
+                new_val = change_data.get("new_value")
+                if isinstance(old_val, dict):
+                    old_val = json.dumps(old_val)
+                elif old_val is not None:
+                    old_val = str(old_val)
+                if isinstance(new_val, dict):
+                    new_val = json.dumps(new_val)
+                elif new_val is not None:
+                    new_val = str(new_val)
+                
                 change_record = Change(
                     snapshot_id=new_snapshot.id,
                     change_type=change_data["change_type"],
                     field_path=change_data["field_path"],
-                    old_value=change_data.get("old_value"),
-                    new_value=change_data.get("new_value"),
+                    old_value=old_val,
+                    new_value=new_val,
                     severity=change_data.get("severity", "medium"),
                     change_category=category,
                     change_maturity=ChangeMaturity.STABLE_CHANGE if spec_type == "stable" else None,

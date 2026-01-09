@@ -245,14 +245,12 @@ export function Snapshots() {
                 </div>
               )}
 
-              <div className="flex-1 min-h-0 flex flex-col">
-                <p className="flex-shrink-0 text-sm font-medium mb-2">Schema Data</p>
-                <div className="flex-1 min-h-0 rounded-lg border bg-slate-950 overflow-hidden">
-                  <div className="h-full overflow-auto p-4">
-                    <pre className="text-xs text-slate-100 font-mono whitespace-pre">
-                      {JSON.stringify(selectedSnapshot.schema_data, null, 2)}
-                    </pre>
-                  </div>
+              <div className="flex flex-col">
+                <p className="text-sm font-medium mb-2">Schema Data</p>
+                <div className="rounded-lg border bg-slate-950 max-h-[40vh] overflow-auto p-4">
+                  <pre className="text-xs text-slate-100 font-mono whitespace-pre">
+                    {JSON.stringify(selectedSnapshot.schema_data, null, 2)}
+                  </pre>
                 </div>
               </div>
             </div>

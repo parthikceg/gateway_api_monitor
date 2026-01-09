@@ -144,6 +144,8 @@ Frontend proxies `/api` requests to backend via Vite config.
 - **Email Notifications**: To send email alerts to subscribers, set up Resend or SendGrid integration. The subscription data is stored in `alert_subscriptions` table.
 
 ## Recent Changes
+- 2026-01-09: Fixed snapshot modal schema data to have proper max-height with scrolling
+- 2026-01-09: Added enum value difference highlighting in Object Explorer (shows new values in beta/preview)
 - 2026-01-07: Removed 8 unused API endpoints (debug endpoints, duplicates, unused features)
 - 2026-01-07: Updated API documentation with comprehensive endpoint reference
 - 2026-01-05: Modernized UI with gradient backgrounds, improved colors, card hover effects

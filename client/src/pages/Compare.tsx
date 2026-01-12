@@ -6,15 +6,23 @@ import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { api } from '@/lib/api'
 
+interface ComparisonChange {
+  change: {
+    change_type: string
+    field_path: string
+    old_value?: unknown
+    new_value?: unknown
+    severity?: string
+  }
+  maturity: string
+  ai_summary?: string
+  timeline?: string
+}
+
 interface ComparisonResult {
   source: string
   target: string
-  changes: Array<{
-    type: string
-    field: string
-    old_value?: unknown
-    new_value?: unknown
-  }>
+  changes: ComparisonChange[]
   upcoming_features_count: number
 }
 
@@ -171,29 +179,41 @@ export function Compare() {
               </div>
             ) : (
               <div className="space-y-3">
-                {result.changes.map((change, idx) => (
+                {result.changes.filter(Boolean).map((item, idx) => (
                   <div key={idx} className="p-4 border rounded-xl bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors">
                     <div className="flex items-center gap-2 mb-2">
                       <Badge variant="outline" className="capitalize bg-background">
-                        {(change.type || 'change').replace(/_/g, ' ')}
+                        {(item.change?.change_type || 'change').replace(/_/g, ' ')}
                       </Badge>
-                      <span className="font-mono text-sm font-medium">{change.field || 'unknown'}</span>
+                      <span className="font-mono text-sm font-medium">{item.change?.field_path || 'unknown'}</span>
+                      {item.change?.severity && (
+                        <Badge variant={item.change.severity === 'high' ? 'destructive' : 'secondary'} className="text-xs">
+                          {item.change.severity}
+                        </Badge>
+                      )}
+                      {item.maturity && (
+                        <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                          {item.maturity.replace(/_/g, ' ')}
+                        </Badge>
+                      )}
                     </div>
-                    {(change.old_value !== undefined || change.new_value !== undefined) && (
+                    {(item.change?.old_value !== undefined || item.change?.new_value !== undefined) && (
                       <div className="flex gap-4 text-sm">
-                        {change.old_value !== undefined && (
+                        {item.change?.old_value !== undefined && item.change.old_value !== null && (
                           <div className="flex-1">
                             <span className="text-muted-foreground">Old: </span>
-                            <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
-                              {JSON.stringify(change.old_value)}
+                            <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs">
+                              {JSON.stringify(item.change.old_value)}
                             </code>
                           </div>
                         )}
-                        {change.new_value !== undefined && (
+                        {item.change?.new_value !== undefined && item.change.new_value !== null && (
                           <div className="flex-1">
                             <span className="text-muted-foreground">New: </span>
-                            <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
-                              {JSON.stringify(change.new_value)}
+                            <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded text-xs">
+                              {typeof item.change.new_value === 'object' 
+                                ? JSON.stringify(item.change.new_value).slice(0, 100) + '...'
+                                : JSON.stringify(item.change.new_value)}
                             </code>
                           </div>
                         )}

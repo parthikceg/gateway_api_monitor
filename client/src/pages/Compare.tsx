@@ -175,9 +175,9 @@ export function Compare() {
                   <div key={idx} className="p-4 border rounded-xl bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors">
                     <div className="flex items-center gap-2 mb-2">
                       <Badge variant="outline" className="capitalize bg-background">
-                        {change.type.replace(/_/g, ' ')}
+                        {(change.type || 'change').replace(/_/g, ' ')}
                       </Badge>
-                      <span className="font-mono text-sm font-medium">{change.field}</span>
+                      <span className="font-mono text-sm font-medium">{change.field || 'unknown'}</span>
                     </div>
                     {(change.old_value !== undefined || change.new_value !== undefined) && (
                       <div className="flex gap-4 text-sm">

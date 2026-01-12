@@ -22,7 +22,11 @@ settings = get_settings()
 app = FastAPI(
     title="Gateway Monitor API",
     description="Monitor Stripe API changes automatically across multiple tiers",
-    version="2.0.0"
+    version="2.0.0",
+    root_path="/api",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 # CORS configuration

@@ -4,6 +4,7 @@ export interface Change {
   id: string
   type: string
   field: string
+  endpoint?: string
   severity: string
   category: string
   maturity: string | null
@@ -27,6 +28,13 @@ export interface HealthStatus {
   service: string
   version: string
   tiers: string[]
+  monitored_endpoints?: string[]
+}
+
+export interface EndpointsResponse {
+  gateway: string
+  endpoints: string[]
+  count: number
 }
 
 async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
@@ -47,21 +55,26 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   getHealth: () => fetchApi<HealthStatus>('/'),
-  
-  getChanges: (params?: { limit?: number; severity?: string; tier?: string; maturity?: string }) => {
+
+  getEndpoints: () => fetchApi<EndpointsResponse>('/endpoints'),
+
+  getChanges: (params?: { limit?: number; offset?: number; severity?: string; tier?: string; maturity?: string; endpoint?: string }) => {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.set('limit', params.limit.toString())
+    if (params?.offset) searchParams.set('offset', params.offset.toString())
     if (params?.severity) searchParams.set('severity', params.severity)
     if (params?.tier) searchParams.set('tier', params.tier)
     if (params?.maturity) searchParams.set('maturity', params.maturity)
+    if (params?.endpoint) searchParams.set('endpoint', params.endpoint)
     const query = searchParams.toString()
-    return fetchApi<{ changes: Change[] }>(`/changes${query ? `?${query}` : ''}`)
+    return fetchApi<{ changes: Change[]; total: number; offset: number; limit: number; has_more: boolean }>(`/changes${query ? `?${query}` : ''}`)
   },
   
-  getSnapshots: (params?: { limit?: number; tier?: string }) => {
+  getSnapshots: (params?: { limit?: number; tier?: string; endpoint?: string }) => {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.set('limit', params.limit.toString())
     if (params?.tier) searchParams.set('tier', params.tier)
+    if (params?.endpoint) searchParams.set('endpoint', params.endpoint)
     const query = searchParams.toString()
     return fetchApi<{ snapshots: Snapshot[] }>(`/snapshots${query ? `?${query}` : ''}`)
   },
@@ -70,10 +83,13 @@ export const api = {
   
   getSnapshotStats: () => fetchApi<{ stats: { tier: string; count: number }[] }>('/snapshots/stats'),
   
-  compareTiers: (source: string, target: string = 'stable') =>
-    fetchApi<{ source: string; target: string; changes: unknown[]; upcoming_features_count: number }>(
-      `/monitor/compare?source=${source}&target=${target}`
-    ),
+  compareTiers: (source: string, target: string = 'stable', endpoint?: string) => {
+    const params = new URLSearchParams({ source, target })
+    if (endpoint) params.set('endpoint', endpoint)
+    return fetchApi<{ source: string; target: string; changes: unknown[]; upcoming_features_count: number }>(
+      `/monitor/compare?${params.toString()}`
+    )
+  },
   
   runMonitoring: (tier?: string) => 
     fetchApi<{ status: string; message?: string }>(`/monitor/run${tier ? `?tier=${tier}` : ''}`, { method: 'POST' }),

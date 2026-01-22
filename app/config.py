@@ -10,11 +10,17 @@ class Settings(BaseSettings):
     openai_api_key: str = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY", "")
     openai_base_url: str = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL", "")
     
-    # Email settings (optional for MVP)
-    email_provider: str = "sendgrid"
-    sendgrid_api_key: str = ""
+    # Email settings (Zoho SMTP)
+    smtp_host: str = "smtp.zoho.com"
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
     alert_from_email: str = ""
     alert_from_name: str = "Gateway Monitor"
+
+    # Weekly digest day (0=Monday, 6=Sunday)
+    weekly_digest_day: int = 0
+    weekly_digest_hour: int = 9
     
     # Monitoring settings
     crawl_schedule_hours: int = 24

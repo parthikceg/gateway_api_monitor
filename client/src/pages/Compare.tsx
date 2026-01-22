@@ -1,10 +1,20 @@
-import { useState } from 'react'
-import { ArrowRight, GitCompare, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ArrowRight, GitCompare, Loader2, Code } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { api } from '@/lib/api'
+
+// Helper to format endpoint path to display name
+function formatEndpointName(endpoint: string): string {
+  if (!endpoint) return 'Unknown'
+  return endpoint
+    .replace('/v1/', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
 
 interface ComparisonResult {
   source: string
@@ -12,8 +22,14 @@ interface ComparisonResult {
   changes: Array<{
     type: string
     field: string
+    endpoint?: string
     old_value?: unknown
     new_value?: unknown
+    change?: {
+      change_type: string
+      field_path: string
+      endpoint?: string
+    }
   }>
   upcoming_features_count: number
 }
@@ -21,13 +37,28 @@ interface ComparisonResult {
 export function Compare() {
   const [source, setSource] = useState('preview')
   const [target, setTarget] = useState('stable')
+  const [endpoint, setEndpoint] = useState('')
+  const [availableEndpoints, setAvailableEndpoints] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ComparisonResult | null>(null)
+
+  useEffect(() => {
+    loadEndpoints()
+  }, [])
+
+  async function loadEndpoints() {
+    try {
+      const res = await api.getEndpoints()
+      setAvailableEndpoints(res.endpoints)
+    } catch (error) {
+      console.error('Failed to load endpoints:', error)
+    }
+  }
 
   async function handleCompare() {
     setLoading(true)
     try {
-      const res = await api.compareTiers(source, target)
+      const res = await api.compareTiers(source, target, endpoint || undefined)
       setResult(res as ComparisonResult)
     } catch (error) {
       console.error('Failed to compare:', error)
@@ -80,9 +111,26 @@ export function Compare() {
               </Select>
             </div>
 
-            <Button 
-              onClick={handleCompare} 
-              disabled={loading} 
+            <div className="flex-1 min-w-[200px]">
+              <label className="text-sm font-medium mb-2 block">Endpoint (optional)</label>
+              <Select value={endpoint || "all"} onValueChange={(value) => setEndpoint(value === "all" ? "" : value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Endpoints" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Endpoints</SelectItem>
+                  {availableEndpoints.map((ep) => (
+                    <SelectItem key={ep} value={ep}>
+                      {formatEndpointName(ep)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              onClick={handleCompare}
+              disabled={loading}
               className="mt-6 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
             >
               {loading ? (
@@ -171,36 +219,49 @@ export function Compare() {
               </div>
             ) : (
               <div className="space-y-3">
-                {result.changes.map((change, idx) => (
-                  <div key={idx} className="p-4 border rounded-xl bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Badge variant="outline" className="capitalize bg-background">
-                        {change.type.replace(/_/g, ' ')}
-                      </Badge>
-                      <span className="font-mono text-sm font-medium">{change.field}</span>
-                    </div>
-                    {(change.old_value !== undefined || change.new_value !== undefined) && (
-                      <div className="flex gap-4 text-sm">
-                        {change.old_value !== undefined && (
-                          <div className="flex-1">
-                            <span className="text-muted-foreground">Old: </span>
-                            <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
-                              {JSON.stringify(change.old_value)}
-                            </code>
-                          </div>
-                        )}
-                        {change.new_value !== undefined && (
-                          <div className="flex-1">
-                            <span className="text-muted-foreground">New: </span>
-                            <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
-                              {JSON.stringify(change.new_value)}
-                            </code>
-                          </div>
+                {result.changes.map((change, idx) => {
+                  const changeData = change.change || change
+                  const changeType = changeData.change_type || change.type || 'unknown'
+                  const fieldPath = changeData.field_path || change.field || 'N/A'
+                  const changeEndpoint = change.endpoint || changeData.endpoint || ''
+
+                  return (
+                    <div key={idx} className="p-4 border rounded-xl bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <Badge variant="outline" className="capitalize bg-background">
+                          {changeType.replace(/_/g, ' ')}
+                        </Badge>
+                        <span className="font-mono text-sm font-medium">{fieldPath}</span>
+                        {changeEndpoint && (
+                          <span className="inline-flex items-center gap-1 text-xs bg-slate-100 px-2 py-0.5 rounded-md">
+                            <Code className="h-3 w-3 text-primary" />
+                            <span className="font-medium">{formatEndpointName(changeEndpoint)}</span>
+                          </span>
                         )}
                       </div>
-                    )}
-                  </div>
-                ))}
+                      {(change.old_value !== undefined || change.new_value !== undefined) && (
+                        <div className="flex gap-4 text-sm">
+                          {change.old_value !== undefined && (
+                            <div className="flex-1">
+                              <span className="text-muted-foreground">Old: </span>
+                              <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
+                                {JSON.stringify(change.old_value)}
+                              </code>
+                            </div>
+                          )}
+                          {change.new_value !== undefined && (
+                            <div className="flex-1">
+                              <span className="text-muted-foreground">New: </span>
+                              <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
+                                {JSON.stringify(change.new_value)}
+                              </code>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             )}
           </CardContent>

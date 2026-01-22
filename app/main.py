@@ -1,4 +1,7 @@
 """FastAPI application entry point"""
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file before any other imports that use env vars
+
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -53,11 +56,27 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     """Health check endpoint"""
+    from app.services.stripe_crawler import StripeCrawler
+    crawler = StripeCrawler()
     return {
         "status": "healthy",
         "service": "Gateway Monitor",
         "version": "2.0.0",
-        "tiers": ["stable", "preview", "beta"]
+        "tiers": ["stable", "preview", "beta"],
+        "monitored_endpoints": crawler.get_monitored_endpoints()
+    }
+
+
+@app.get("/endpoints")
+async def get_monitored_endpoints():
+    """Get list of all monitored Stripe API endpoints"""
+    from app.services.stripe_crawler import StripeCrawler
+    crawler = StripeCrawler()
+    endpoints = crawler.get_monitored_endpoints()
+    return {
+        "gateway": "stripe",
+        "endpoints": endpoints,
+        "count": len(endpoints)
     }
 
 
@@ -100,29 +119,32 @@ async def run_monitoring(
 async def compare_tiers(
     source: str,
     target: str = "stable",
+    endpoint: str = None,
     db: Session = Depends(get_db)
 ):
     """
     Compare two tiers to see upcoming features
-    
+
     Query params:
     - source: Tier to compare from ('preview' or 'beta')
     - target: Tier to compare against (default: 'stable')
-    
+    - endpoint: Optional endpoint to filter comparison (e.g., '/v1/payment_intents')
+
     Examples:
     - /monitor/compare?source=preview&target=stable - See what's coming from preview to stable
     - /monitor/compare?source=beta&target=stable - See what's in beta vs stable
+    - /monitor/compare?source=preview&target=stable&endpoint=/v1/charges - Compare specific endpoint
     """
     try:
         if source not in ["preview", "beta"]:
             raise HTTPException(status_code=400, detail="Source must be preview or beta")
         if target not in ["stable", "preview"]:
             raise HTTPException(status_code=400, detail="Target must be stable or preview")
-        
+
         service = MonitoringService(db)
-        result = await service._compare_tiers(source, target)
+        result = await service._compare_tiers(source, target, endpoint)
         return result
-        
+
     except Exception as e:
         logger.error(f"Comparison failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -229,46 +251,58 @@ async def get_snapshot_detail(snapshot_id: str, db: Session = Depends(get_db)):
 @app.get("/changes")
 async def get_changes(
     limit: int = 20,
+    offset: int = 0,
     severity: str = None,
     tier: Optional[str] = None,
     maturity: Optional[str] = None,
+    endpoint: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
-    Get recent changes with filtering
-    
+    Get recent changes with filtering and pagination
+
     Query params:
     - limit: Number of changes (default: 20)
+    - offset: Number of changes to skip (default: 0)
     - severity: Filter by severity - 'high', 'medium', 'low', 'info'
     - tier: Filter by tier - 'stable', 'preview', 'beta'
     - maturity: Filter by maturity - 'stable_change', 'new_preview', 'new_beta', etc.
+    - endpoint: Filter by endpoint path - e.g., '/v1/payment_methods'
     """
     query = db.query(Change).join(Snapshot)
-    
+
     if severity:
         query = query.filter(Change.severity == severity)
-    
+
     if tier:
         if tier not in ["stable", "preview", "beta"]:
             raise HTTPException(status_code=400, detail="Invalid tier")
         spec_type_enum = SpecType[tier.upper()]
         query = query.filter(Snapshot.spec_type == spec_type_enum)
-    
+
     if maturity:
         try:
             maturity_enum = ChangeMaturity[maturity.upper()]
             query = query.filter(Change.change_maturity == maturity_enum)
         except KeyError:
             raise HTTPException(status_code=400, detail="Invalid maturity level")
-    
-    changes = query.order_by(Change.detected_at.desc()).limit(limit).all()
-    
+
+    if endpoint:
+        query = query.filter(Snapshot.endpoint_path == endpoint)
+
+    # Get total count before pagination
+    total_count = query.count()
+
+    # Apply pagination
+    changes = query.order_by(Change.detected_at.desc()).offset(offset).limit(limit).all()
+
     return {
         "changes": [
             {
                 "id": str(c.id),
                 "type": c.change_type,
                 "field": c.field_path,
+                "endpoint": c.snapshot.endpoint_path if c.snapshot else "N/A",
                 "severity": c.severity,
                 "category": c.change_category,
                 "maturity": c.change_maturity.value if c.change_maturity else None,
@@ -277,7 +311,11 @@ async def get_changes(
                 "detected_at": c.detected_at.isoformat()
             }
             for c in changes
-        ]
+        ],
+        "total": total_count,
+        "offset": offset,
+        "limit": limit,
+        "has_more": (offset + len(changes)) < total_count
     }
 
 
@@ -384,17 +422,26 @@ Keep responses concise but informative. Use bullet points for clarity. Focus on 
 async def ask_ai(request: AIQuestion):
     """Ask AI about a field or API change"""
     try:
+        # Support both Replit (AI_INTEGRATIONS_*) and local (OPENAI_API_KEY) env vars
+        api_key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL") or None
+
         client = OpenAI(
-            api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
-            base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
+            api_key=api_key,
+            base_url=base_url
         )
         
         field_info = request.context.get('field', {})
         tier = field_info.get('tier', 'stable')
-        
+        endpoint = request.context.get('endpoint', '') or field_info.get('endpoint', '')
+
+        # Format endpoint name for display
+        endpoint_display = endpoint.replace('/v1/', '').replace('_', ' ').title() if endpoint else 'Unknown'
+
         context_str = f"""
 **Field Being Discussed:**
 - Field Name: `{field_info.get('name', 'Unknown')}`
+- API Endpoint: {endpoint_display} (`{endpoint}`)
 - Data Type: {field_info.get('type', 'Unknown')}
 - API Tier: {tier.upper()} {'(Generally Available)' if tier == 'stable' else '(Not yet in GA - subject to change)'}
 - Description from Stripe: {field_info.get('description', 'No description available')}
@@ -476,3 +523,48 @@ async def list_subscribers(db: Session = Depends(get_db)):
         ],
         "count": len(subscribers)
     }
+
+
+# ============================================================================
+# EMAIL TEST ENDPOINT
+# ============================================================================
+
+from app.services.email_service import EmailService
+
+@app.post("/email/test")
+async def test_email(email: str, name: str = "Test User"):
+    """Send a test email to verify SMTP configuration"""
+    try:
+        email_service = EmailService()
+
+        if not email_service.enabled:
+            return {
+                "status": "error",
+                "message": "Email service not configured. Check SMTP_USERNAME, SMTP_PASSWORD, and ALERT_FROM_EMAIL in .env"
+            }
+
+        # Send a test change alert
+        test_changes = [
+            {
+                "type": "property_added",
+                "field": "test_field",
+                "severity": "info",
+                "tier": "beta",
+                "summary": "This is a test email to verify your Gateway Monitor email configuration is working correctly."
+            }
+        ]
+
+        success = email_service.send_change_alert(
+            to_email=email,
+            to_name=name,
+            changes=test_changes
+        )
+
+        if success:
+            return {"status": "success", "message": f"Test email sent to {email}"}
+        else:
+            return {"status": "error", "message": "Failed to send email. Check server logs for details."}
+
+    except Exception as e:
+        logger.error(f"Test email failed: {e}")
+        return {"status": "error", "message": str(e)}

@@ -15,14 +15,16 @@ class AIAnalyzer:
     """Uses AI to analyze and summarize API changes"""
 
     def __init__(self):
-        # Using Replit's AI Integrations service (modelfarm)
+        # Support both Replit (AI_INTEGRATIONS_*) and local (OPENAI_API_KEY) env vars
+        api_key = os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        base_url = os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL") or None
+
         self.client = OpenAI(
-            api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
-            base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL"),
+            api_key=api_key,
+            base_url=base_url,
         )
 
-        self.ai_enabled = bool(
-            os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL"))
+        self.ai_enabled = bool(api_key)
         logger.info(f"AI Analyzer enabled: {self.ai_enabled}")
 
     async def analyze_change(self, change: Dict[str, Any]) -> Optional[str]:
@@ -62,18 +64,23 @@ class AIAnalyzer:
         old_value = change.get("old_value")
         new_value = change.get("new_value")
         severity = change.get("severity", "unknown")
+        endpoint = change.get("endpoint", "/v1/payment_intents")
 
-        return f"""Analyze this API change for Stripe Payment Intents:
+        # Format endpoint name for display
+        endpoint_display = endpoint.replace('/v1/', '').replace('_', ' ').title() if endpoint else "Payment Intents"
+
+        return f"""Analyze this API change for Stripe {endpoint_display} ({endpoint}):
 
 Change Type: {change_type}
 Field: {field_path}
+Endpoint: {endpoint}
 Severity: {severity}
 Old Value: {json.dumps(old_value, indent=2) if old_value else "None"}
 New Value: {json.dumps(new_value, indent=2) if new_value else "None"}
 
 Provide a concise summary (2–3 sentences) covering:
-1. What changed and why it matters
-2. Potential impact on developers
+1. What changed and why it matters for this endpoint
+2. Potential impact on developers using this API
 3. Recommended action (if any)
 """
 

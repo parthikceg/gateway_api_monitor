@@ -1,10 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Activity, AlertTriangle, CheckCircle, Database, TrendingUp, ArrowRight } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle, Database, TrendingUp, ArrowRight, Code } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { api, type Change } from '@/lib/api'
 import { formatRelativeTime } from '@/lib/utils'
+
+// Helper to format endpoint path to display name
+function formatEndpointName(endpoint: string): string {
+  if (!endpoint) return 'Unknown'
+  // /v1/payment_intents -> Payment Intents
+  return endpoint
+    .replace('/v1/', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
 
 interface DashboardProps {
   onNavigate: (page: string, params?: Record<string, string>) => void
@@ -15,6 +26,7 @@ interface Stats {
   highSeverity: number
   recentSnapshots: number
   tiersMonitored: string[]
+  monitoredEndpoints: string[]
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
@@ -23,6 +35,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     highSeverity: 0,
     recentSnapshots: 0,
     tiersMonitored: ['stable', 'preview', 'beta'],
+    monitoredEndpoints: [],
   })
   const [recentChanges, setRecentChanges] = useState<Change[]>([])
   const [loading, setLoading] = useState(true)
@@ -34,9 +47,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
   async function loadData() {
     try {
-      const [changesRes, snapshotsRes] = await Promise.all([
+      const [changesRes, snapshotsRes, endpointsRes] = await Promise.all([
         api.getChanges({ limit: 50 }),
         api.getSnapshotStats(),
+        api.getEndpoints(),
       ])
 
       const changes = changesRes.changes
@@ -48,6 +62,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         highSeverity: highSeverityCount,
         recentSnapshots: totalSnapshots,
         tiersMonitored: ['stable', 'preview', 'beta'],
+        monitoredEndpoints: endpointsRes.endpoints || [],
       })
 
       setRecentChanges(changes.slice(0, 5))
@@ -207,22 +222,28 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             ) : (
               <div className="space-y-3">
                 {recentChanges.map((change) => (
-                  <div 
-                    key={change.id} 
+                  <div
+                    key={change.id}
                     className="flex items-start gap-3 p-3 rounded-xl border bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors cursor-pointer"
                     onClick={() => onNavigate('changes', { tier: change.tier })}
                   >
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <Badge variant={getSeverityVariant(change.severity) as 'high' | 'medium' | 'low' | 'info'} className="capitalize">
                           {change.severity}
                         </Badge>
                         <Badge variant={change.tier as 'stable' | 'preview' | 'beta'} className="capitalize">
                           {change.tier}
                         </Badge>
+                        {change.endpoint && (
+                          <Badge variant="outline" className="text-xs bg-slate-50">
+                            <Code className="h-3 w-3 mr-1" />
+                            {formatEndpointName(change.endpoint)}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm font-medium truncate">{change.field}</p>
-                      <p className="text-xs text-muted-foreground">{change.type}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{change.type.replace(/_/g, ' ')}</p>
                     </div>
                     <span className="text-xs text-muted-foreground whitespace-nowrap">
                       {formatRelativeTime(change.detected_at)}
@@ -237,31 +258,33 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <Card className="card-hover">
           <CardHeader>
             <CardTitle>API Coverage</CardTitle>
-            <CardDescription>Currently monitored endpoints</CardDescription>
+            <CardDescription>
+              {stats.monitoredEndpoints.length} Stripe endpoints monitored
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between p-3 rounded-xl border bg-gradient-to-r from-green-50/50 to-transparent">
-                <div>
-                  <p className="font-medium">Payment Intents</p>
-                  <p className="text-sm text-muted-foreground">Stripe</p>
+            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-2">
+              {stats.monitoredEndpoints.map((endpoint) => (
+                <div
+                  key={endpoint}
+                  className="flex items-center justify-between p-3 rounded-xl border bg-gradient-to-r from-green-50/50 to-transparent hover:from-green-50 transition-colors cursor-pointer"
+                  onClick={() => onNavigate('explorer', { endpoint })}
+                >
+                  <div className="flex items-center gap-2">
+                    <Code className="h-4 w-4 text-primary" />
+                    <div>
+                      <p className="font-medium text-sm">{formatEndpointName(endpoint)}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{endpoint}</p>
+                    </div>
+                  </div>
+                  <span className="badge-stable px-2 py-0.5 rounded-full text-xs font-semibold">Active</span>
                 </div>
-                <span className="badge-stable px-2.5 py-1 rounded-full text-xs font-semibold">Active</span>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-xl border opacity-50">
-                <div>
-                  <p className="font-medium">Checkout Sessions</p>
-                  <p className="text-sm text-muted-foreground">Stripe</p>
-                </div>
-                <Badge variant="secondary">Coming Soon</Badge>
-              </div>
-              <div className="flex items-center justify-between p-3 rounded-xl border opacity-50">
-                <div>
-                  <p className="font-medium">Transactions</p>
-                  <p className="text-sm text-muted-foreground">Braintree</p>
-                </div>
-                <Badge variant="secondary">Coming Soon</Badge>
-              </div>
+              ))}
+              {stats.monitoredEndpoints.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Run monitoring to see active endpoints
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Database, RefreshCw, X, Calendar, Tag, ExternalLink } from 'lucide-react'
+import { Database, RefreshCw, Calendar, ExternalLink, Code, Filter } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -9,25 +9,51 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { api, type Snapshot } from '@/lib/api'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 
+// Helper to format endpoint path to display name
+function formatEndpointName(endpoint: string): string {
+  if (!endpoint) return 'Unknown'
+  return endpoint
+    .replace('/v1/', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 export function Snapshots() {
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   const [stats, setStats] = useState<{ tier: string; count: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [tierFilter, setTierFilter] = useState('')
+  const [endpointFilter, setEndpointFilter] = useState('')
+  const [availableEndpoints, setAvailableEndpoints] = useState<string[]>([])
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
+    loadEndpoints()
+  }, [])
+
+  useEffect(() => {
     loadData()
-  }, [tierFilter])
+  }, [tierFilter, endpointFilter])
+
+  async function loadEndpoints() {
+    try {
+      const res = await api.getEndpoints()
+      setAvailableEndpoints(res.endpoints)
+    } catch (error) {
+      console.error('Failed to load endpoints:', error)
+    }
+  }
 
   async function loadData() {
     setLoading(true)
     try {
-      const params: { limit: number; tier?: string } = { limit: 50 }
+      const params: { limit: number; tier?: string; endpoint?: string } = { limit: 50 }
       if (tierFilter) params.tier = tierFilter
-      
+      if (endpointFilter) params.endpoint = endpointFilter
+
       const [snapshotsRes, statsRes] = await Promise.all([
         api.getSnapshots(params),
         api.getSnapshotStats(),
@@ -121,10 +147,15 @@ export function Snapshots() {
         })}
       </div>
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Filter className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-medium">Filters:</span>
+        </div>
+
         <Select value={tierFilter || "all"} onValueChange={(value) => setTierFilter(value === "all" ? "" : value)}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder="Filter by tier" />
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="Tier" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Tiers</SelectItem>
@@ -134,9 +165,23 @@ export function Snapshots() {
           </SelectContent>
         </Select>
 
-        {tierFilter && (
-          <Button variant="ghost" size="sm" onClick={() => setTierFilter('')}>
-            Clear filter
+        <Select value={endpointFilter || "all"} onValueChange={(value) => setEndpointFilter(value === "all" ? "" : value)}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Endpoint" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Endpoints</SelectItem>
+            {availableEndpoints.map((endpoint) => (
+              <SelectItem key={endpoint} value={endpoint}>
+                {formatEndpointName(endpoint)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {(tierFilter || endpointFilter) && (
+          <Button variant="ghost" size="sm" onClick={() => { setTierFilter(''); setEndpointFilter(''); }}>
+            Clear filters
           </Button>
         )}
       </div>
@@ -152,8 +197,8 @@ export function Snapshots() {
       ) : (
         <div className="space-y-3">
           {snapshots.map((snapshot) => (
-            <Card 
-              key={snapshot.id} 
+            <Card
+              key={snapshot.id}
               className="card-hover cursor-pointer transition-all"
               onClick={() => handleViewSnapshot(snapshot)}
             >
@@ -161,10 +206,14 @@ export function Snapshots() {
                 <div className="flex items-start justify-between">
                   <div>
                     <CardTitle className="text-base flex items-center gap-2">
-                      <Database className="h-4 w-4 text-primary" />
-                      {snapshot.endpoint}
+                      <Code className="h-4 w-4 text-primary" />
+                      {formatEndpointName(snapshot.endpoint)}
                     </CardTitle>
-                    <CardDescription>{snapshot.gateway}</CardDescription>
+                    <CardDescription className="flex items-center gap-2">
+                      <span className="font-mono text-xs">{snapshot.endpoint}</span>
+                      <span>|</span>
+                      <span>{snapshot.gateway}</span>
+                    </CardDescription>
                   </div>
                   <span className={`badge-${snapshot.tier.toLowerCase()} px-2.5 py-1 rounded-full text-xs font-semibold capitalize`}>
                     {snapshot.tier}
@@ -187,14 +236,14 @@ export function Snapshots() {
       )}
 
       <Dialog open={!!selectedSnapshot} onOpenChange={() => setSelectedSnapshot(null)}>
-        <DialogContent className="max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-3xl h-[90vh] flex flex-col">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5 text-primary" />
-              Snapshot Details
+              <Code className="h-5 w-5 text-primary" />
+              {selectedSnapshot ? formatEndpointName(selectedSnapshot.endpoint) : 'Snapshot'} Details
             </DialogTitle>
             <DialogDescription>
-              Full captured API object data
+              Full captured API schema for {selectedSnapshot?.endpoint || 'this endpoint'}
             </DialogDescription>
           </DialogHeader>
 
@@ -207,11 +256,12 @@ export function Snapshots() {
               <div className="flex-shrink-0 grid grid-cols-2 gap-4">
                 <div className="p-3 rounded-lg bg-muted/50">
                   <p className="text-xs text-muted-foreground mb-1">Endpoint</p>
-                  <p className="font-medium">{selectedSnapshot.endpoint}</p>
+                  <p className="font-medium">{formatEndpointName(selectedSnapshot.endpoint)}</p>
+                  <p className="font-mono text-xs text-muted-foreground">{selectedSnapshot.endpoint}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-muted/50">
                   <p className="text-xs text-muted-foreground mb-1">Gateway</p>
-                  <p className="font-medium">{selectedSnapshot.gateway}</p>
+                  <p className="font-medium capitalize">{selectedSnapshot.gateway}</p>
                 </div>
                 <div className="p-3 rounded-lg bg-muted/50">
                   <p className="text-xs text-muted-foreground mb-1">Tier</p>
@@ -245,9 +295,9 @@ export function Snapshots() {
                 </div>
               )}
 
-              <div className="flex flex-col">
-                <p className="text-sm font-medium mb-2">Schema Data</p>
-                <div className="rounded-lg border bg-slate-950 max-h-[40vh] overflow-auto p-4">
+              <div className="flex flex-col min-h-0 flex-1 overflow-hidden">
+                <p className="text-sm font-medium mb-2 flex-shrink-0">Schema Data</p>
+                <div className="rounded-lg border bg-slate-950 overflow-auto p-4 flex-1 min-h-0">
                   <pre className="text-xs text-slate-100 font-mono whitespace-pre">
                     {JSON.stringify(selectedSnapshot.schema_data, null, 2)}
                   </pre>

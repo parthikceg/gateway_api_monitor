@@ -1,13 +1,24 @@
 import { useEffect, useState } from 'react'
-import { ChevronRight, ChevronDown, MessageSquare, Sparkles } from 'lucide-react'
+import { ChevronRight, ChevronDown, MessageSquare, Sparkles, Code } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChatWidget } from '@/components/ChatWidget'
 import { api, type Snapshot } from '@/lib/api'
 import { cn } from '@/lib/utils'
+
+// Helper to format endpoint path to display name
+function formatEndpointName(endpoint: string): string {
+  if (!endpoint) return 'Unknown'
+  return endpoint
+    .replace('/v1/', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
 
 interface Field {
   name: string
@@ -23,17 +34,21 @@ interface Field {
 
 interface ExplorerProps {
   initialTier?: string
+  initialEndpoint?: string
 }
 
-export function Explorer({ initialTier }: ExplorerProps) {
+export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
   const [snapshots, setSnapshots] = useState<{ stable?: Snapshot; preview?: Snapshot; beta?: Snapshot }>({})
   const [loading, setLoading] = useState(true)
   const [activeTier, setActiveTier] = useState(initialTier || 'stable')
+  const [availableEndpoints, setAvailableEndpoints] = useState<string[]>([])
+  const [selectedEndpoint, setSelectedEndpoint] = useState<string>(initialEndpoint || '/v1/payment_intents')
   const [chatField, setChatField] = useState<{
     name: string
     type: string
     description?: string
     tier?: string
+    endpoint?: string
   } | null>(null)
   const [fieldAvailability, setFieldAvailability] = useState<{
     beta_only: string[]
@@ -48,27 +63,61 @@ export function Explorer({ initialTier }: ExplorerProps) {
   }, [initialTier])
 
   useEffect(() => {
-    loadSnapshots()
+    if (initialEndpoint) {
+      setSelectedEndpoint(initialEndpoint)
+    }
+  }, [initialEndpoint])
+
+  useEffect(() => {
+    loadEndpoints()
   }, [])
 
-  async function loadSnapshots() {
+  useEffect(() => {
+    if (selectedEndpoint) {
+      loadSnapshots()
+    }
+  }, [selectedEndpoint])
+
+  async function loadEndpoints() {
     try {
+      const res = await api.getEndpoints()
+      setAvailableEndpoints(res.endpoints)
+      if (res.endpoints.length > 0 && !initialEndpoint) {
+        setSelectedEndpoint(res.endpoints[0])
+      }
+    } catch (error) {
+      console.error('Failed to load endpoints:', error)
+    }
+  }
+
+  async function loadSnapshots() {
+    setLoading(true)
+    try {
+      // Get latest snapshot for selected endpoint in each tier
       const [stableRes, previewRes, betaRes] = await Promise.all([
-        api.getSnapshots({ limit: 1, tier: 'stable' }),
-        api.getSnapshots({ limit: 1, tier: 'preview' }),
-        api.getSnapshots({ limit: 1, tier: 'beta' }),
+        api.getSnapshots({ limit: 50, tier: 'stable' }),
+        api.getSnapshots({ limit: 50, tier: 'preview' }),
+        api.getSnapshots({ limit: 50, tier: 'beta' }),
       ])
 
+      // Filter to find the snapshot for the selected endpoint
+      const findEndpointSnapshot = (snapshots: Snapshot[]) =>
+        snapshots.find(s => s.endpoint === selectedEndpoint)
+
       const snapshots: { stable?: Snapshot; preview?: Snapshot; beta?: Snapshot } = {}
-      
-      if (stableRes.snapshots[0]) {
-        snapshots.stable = await api.getSnapshotDetail(stableRes.snapshots[0].id)
+
+      const stableSnapshot = findEndpointSnapshot(stableRes.snapshots)
+      const previewSnapshot = findEndpointSnapshot(previewRes.snapshots)
+      const betaSnapshot = findEndpointSnapshot(betaRes.snapshots)
+
+      if (stableSnapshot) {
+        snapshots.stable = await api.getSnapshotDetail(stableSnapshot.id)
       }
-      if (previewRes.snapshots[0]) {
-        snapshots.preview = await api.getSnapshotDetail(previewRes.snapshots[0].id)
+      if (previewSnapshot) {
+        snapshots.preview = await api.getSnapshotDetail(previewSnapshot.id)
       }
-      if (betaRes.snapshots[0]) {
-        snapshots.beta = await api.getSnapshotDetail(betaRes.snapshots[0].id)
+      if (betaSnapshot) {
+        snapshots.beta = await api.getSnapshotDetail(betaSnapshot.id)
       }
 
       setSnapshots(snapshots)
@@ -250,9 +299,29 @@ export function Explorer({ initialTier }: ExplorerProps) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold">Object Explorer</h2>
-        <p className="text-muted-foreground">Explore the full structure of monitored API objects</p>
+      <div className="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h2 className="text-2xl font-bold">Object Explorer</h2>
+          <p className="text-muted-foreground">Explore the full structure of monitored API objects</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <Code className="h-5 w-5 text-primary" />
+          <Select value={selectedEndpoint} onValueChange={setSelectedEndpoint}>
+            <SelectTrigger className="w-[240px]">
+              <SelectValue placeholder="Select endpoint" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableEndpoints.map((endpoint) => (
+                <SelectItem key={endpoint} value={endpoint}>
+                  <div className="flex flex-col">
+                    <span className="font-medium">{formatEndpointName(endpoint)}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{endpoint}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       <div className="flex gap-4 flex-wrap">
@@ -287,29 +356,32 @@ export function Explorer({ initialTier }: ExplorerProps) {
         </TabsList>
 
         <TabsContent value="stable">
-          <FieldExplorer 
-            fields={stableFields} 
+          <FieldExplorer
+            fields={stableFields}
             tier="stable"
+            endpoint={selectedEndpoint}
             fieldAvailability={fieldAvailability}
-            onAskAI={(field) => setChatField({ ...field, tier: 'stable' })}
+            onAskAI={(field) => setChatField({ ...field, tier: 'stable', endpoint: selectedEndpoint })}
           />
         </TabsContent>
-        
+
         <TabsContent value="preview">
-          <FieldExplorer 
-            fields={previewFields} 
+          <FieldExplorer
+            fields={previewFields}
             tier="preview"
+            endpoint={selectedEndpoint}
             fieldAvailability={fieldAvailability}
-            onAskAI={(field) => setChatField({ ...field, tier: 'preview' })}
+            onAskAI={(field) => setChatField({ ...field, tier: 'preview', endpoint: selectedEndpoint })}
           />
         </TabsContent>
-        
+
         <TabsContent value="beta">
-          <FieldExplorer 
-            fields={betaFields} 
+          <FieldExplorer
+            fields={betaFields}
             tier="beta"
+            endpoint={selectedEndpoint}
             fieldAvailability={fieldAvailability}
-            onAskAI={(field) => setChatField({ ...field, tier: 'beta' })}
+            onAskAI={(field) => setChatField({ ...field, tier: 'beta', endpoint: selectedEndpoint })}
           />
         </TabsContent>
       </Tabs>
@@ -325,17 +397,18 @@ export function Explorer({ initialTier }: ExplorerProps) {
 interface FieldExplorerProps {
   fields: Field[]
   tier: string
+  endpoint: string
   fieldAvailability: { beta_only: string[]; preview_only: string[] }
   onAskAI: (field: { name: string; type: string; description?: string }) => void
 }
 
-function FieldExplorer({ fields, tier, fieldAvailability, onAskAI }: FieldExplorerProps) {
+function FieldExplorer({ fields, tier, endpoint, fieldAvailability, onAskAI }: FieldExplorerProps) {
   if (fields.length === 0) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center justify-center h-64">
           <p className="text-lg font-medium">No fields available</p>
-          <p className="text-sm text-muted-foreground">Run monitoring to capture API snapshots</p>
+          <p className="text-sm text-muted-foreground">Run monitoring to capture API snapshots for this endpoint</p>
         </CardContent>
       </Card>
     )
@@ -344,8 +417,15 @@ function FieldExplorer({ fields, tier, fieldAvailability, onAskAI }: FieldExplor
   return (
     <Card className="card-hover">
       <CardHeader>
-        <CardTitle>Payment Intents</CardTitle>
-        <CardDescription>Stripe API object structure for {tier} tier</CardDescription>
+        <CardTitle className="flex items-center gap-2">
+          <Code className="h-5 w-5 text-primary" />
+          {formatEndpointName(endpoint)}
+        </CardTitle>
+        <CardDescription>
+          <span className="font-mono text-xs">{endpoint}</span>
+          <span className="mx-2">•</span>
+          Stripe API object structure for {tier} tier
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-[500px]">

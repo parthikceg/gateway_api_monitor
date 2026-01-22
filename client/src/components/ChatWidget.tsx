@@ -18,8 +18,19 @@ interface ChatWidgetProps {
     type: string
     description?: string
     tier?: string
+    endpoint?: string
   } | null
   onClose?: () => void
+}
+
+// Helper to format endpoint path to display name
+function formatEndpointName(endpoint: string): string {
+  if (!endpoint) return 'Unknown'
+  return endpoint
+    .replace('/v1/', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
 }
 
 export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
@@ -34,10 +45,12 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
     if (fieldContext) {
       setIsOpen(true)
       setCurrentContext(fieldContext)
+      const endpointInfo = fieldContext.endpoint ? ` from the **${formatEndpointName(fieldContext.endpoint)}** endpoint (\`${fieldContext.endpoint}\`)` : ''
+      const tierInfo = fieldContext.tier ? ` available in the ${fieldContext.tier} tier` : ''
       const welcomeMessage: Message = {
         id: Date.now().toString(),
         role: 'assistant',
-        content: `I'm here to help you understand the **${fieldContext.name}** field in the Stripe API. This is a ${fieldContext.type} field${fieldContext.tier ? ` available in the ${fieldContext.tier} tier` : ''}.\n\n${fieldContext.description || ''}\n\nWhat would you like to know about this field?`,
+        content: `I'm here to help you understand the **${fieldContext.name}** field${endpointInfo}. This is a ${fieldContext.type} field${tierInfo}.\n\n${fieldContext.description || ''}\n\nWhat would you like to know about this field?`,
         timestamp: new Date(),
       }
       setMessages([welcomeMessage])
@@ -78,14 +91,15 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
     setIsLoading(true)
 
     try {
-      const contextToSend = currentContext || { name: 'General', type: 'general', description: 'General Stripe API question' }
+      const contextToSend = currentContext || { name: 'General', type: 'general', description: 'General Stripe API question', endpoint: '' }
       const historyToSend = messages.slice(-6).map(m => ({
         role: m.role,
         content: m.content
       }))
-      
+
       const response = await api.askAI(userInput, {
         field: contextToSend,
+        endpoint: contextToSend.endpoint || '',
         conversationHistory: historyToSend
       })
 
@@ -139,7 +153,11 @@ export function ChatWidget({ fieldContext, onClose }: ChatWidgetProps) {
           <div>
             <h3 className="font-semibold">AI Assistant</h3>
             <p className="text-xs opacity-90">
-              {currentContext ? `Discussing: ${currentContext.name}` : 'Stripe API Expert'}
+              {currentContext
+                ? currentContext.endpoint
+                  ? `${currentContext.name} (${formatEndpointName(currentContext.endpoint)})`
+                  : `Discussing: ${currentContext.name}`
+                : 'Stripe API Expert'}
             </p>
           </div>
         </div>

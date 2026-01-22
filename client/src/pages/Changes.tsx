@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Filter, Sparkles } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Filter, Sparkles, Code } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,19 +8,40 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Change } from '@/lib/api'
 import { formatDate, formatRelativeTime } from '@/lib/utils'
 
+// Helper to format endpoint path to display name
+function formatEndpointName(endpoint: string): string {
+  if (!endpoint) return 'Unknown'
+  return endpoint
+    .replace('/v1/', '')
+    .split('_')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
 interface ChangesProps {
   initialSeverity?: string
   initialTier?: string
+  initialEndpoint?: string
+  onNavigate?: (page: string, params?: Record<string, string>) => void
 }
 
-export function Changes({ initialSeverity, initialTier }: ChangesProps) {
+export function Changes({ initialSeverity, initialTier, initialEndpoint, onNavigate }: ChangesProps) {
   const [changes, setChanges] = useState<Change[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [availableEndpoints, setAvailableEndpoints] = useState<string[]>([])
   const [filters, setFilters] = useState({
     severity: initialSeverity || '',
     tier: initialTier || '',
-    limit: 50,
+    endpoint: initialEndpoint || '',
   })
+  const [offset, setOffset] = useState(0)
+  const limit = 20
+
+  useEffect(() => {
+    loadEndpoints()
+  }, [])
 
   useEffect(() => {
     if (initialSeverity) {
@@ -29,25 +50,70 @@ export function Changes({ initialSeverity, initialTier }: ChangesProps) {
     if (initialTier) {
       setFilters(f => ({ ...f, tier: initialTier }))
     }
-  }, [initialSeverity, initialTier])
+    if (initialEndpoint) {
+      setFilters(f => ({ ...f, endpoint: initialEndpoint }))
+    }
+  }, [initialSeverity, initialTier, initialEndpoint])
 
   useEffect(() => {
-    loadChanges()
+    // Reset and reload when filters change
+    setChanges([])
+    setOffset(0)
+    setHasMore(true)
+    loadChanges(0)
   }, [filters])
 
-  async function loadChanges() {
-    setLoading(true)
+  async function loadEndpoints() {
     try {
-      const params: { limit: number; severity?: string; tier?: string } = { limit: filters.limit }
+      const res = await api.getEndpoints()
+      setAvailableEndpoints(res.endpoints)
+    } catch (error) {
+      console.error('Failed to load endpoints:', error)
+    }
+  }
+
+  async function loadChanges(currentOffset: number) {
+    const isInitialLoad = currentOffset === 0
+
+    if (isInitialLoad) {
+      setLoading(true)
+    } else {
+      setLoadingMore(true)
+    }
+
+    try {
+      const params: { limit: number; offset: number; severity?: string; tier?: string; endpoint?: string } = {
+        limit,
+        offset: currentOffset
+      }
       if (filters.severity) params.severity = filters.severity
       if (filters.tier) params.tier = filters.tier
-      
+      if (filters.endpoint) params.endpoint = filters.endpoint
+
       const res = await api.getChanges(params)
-      setChanges(res.changes)
+
+      if (isInitialLoad) {
+        setChanges(res.changes)
+      } else {
+        setChanges(prev => [...prev, ...res.changes])
+      }
+
+      setHasMore(res.has_more)
+      setOffset(currentOffset + res.changes.length)
     } catch (error) {
       console.error('Failed to load changes:', error)
     } finally {
-      setLoading(false)
+      if (isInitialLoad) {
+        setLoading(false)
+      } else {
+        setLoadingMore(false)
+      }
+    }
+  }
+
+  function loadMore() {
+    if (!loadingMore && hasMore) {
+      loadChanges(offset)
     }
   }
 
@@ -122,19 +188,51 @@ export function Changes({ initialSeverity, initialTier }: ChangesProps) {
             </SelectContent>
           </Select>
 
-          {(filters.severity || filters.tier) && (
-            <Button variant="ghost" size="sm" onClick={() => setFilters({ severity: '', tier: '', limit: 50 })}>
+          <Select value={filters.endpoint || "all"} onValueChange={(value) => setFilters(f => ({ ...f, endpoint: value === "all" ? "" : value }))}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Endpoint" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Endpoints</SelectItem>
+              {availableEndpoints.map((endpoint) => (
+                <SelectItem key={endpoint} value={endpoint}>
+                  {formatEndpointName(endpoint)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {(filters.severity || filters.tier || filters.endpoint) && (
+            <Button variant="ghost" size="sm" onClick={() => setFilters({ severity: '', tier: '', endpoint: '' })}>
               Clear filters
             </Button>
           )}
         </div>
 
         <TabsContent value="recent">
-          <ChangesList changes={recentChanges} loading={loading} getSeverityVariant={getSeverityVariant} getChangeIcon={getChangeIcon} />
+          <ChangesList
+            changes={recentChanges}
+            loading={loading}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
+            onLoadMore={loadMore}
+            getSeverityVariant={getSeverityVariant}
+            getChangeIcon={getChangeIcon}
+            onNavigate={onNavigate}
+          />
         </TabsContent>
-        
+
         <TabsContent value="all">
-          <ChangesList changes={changes} loading={loading} getSeverityVariant={getSeverityVariant} getChangeIcon={getChangeIcon} />
+          <ChangesList
+            changes={changes}
+            loading={loading}
+            loadingMore={loadingMore}
+            hasMore={hasMore}
+            onLoadMore={loadMore}
+            getSeverityVariant={getSeverityVariant}
+            getChangeIcon={getChangeIcon}
+            onNavigate={onNavigate}
+          />
         </TabsContent>
       </Tabs>
     </div>
@@ -144,11 +242,43 @@ export function Changes({ initialSeverity, initialTier }: ChangesProps) {
 interface ChangesListProps {
   changes: Change[]
   loading: boolean
+  loadingMore: boolean
+  hasMore: boolean
+  onLoadMore: () => void
   getSeverityVariant: (severity: string) => string
   getChangeIcon: (type: string) => string
+  onNavigate?: (page: string, params?: Record<string, string>) => void
 }
 
-function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: ChangesListProps) {
+function ChangesList({ changes, loading, loadingMore, hasMore, onLoadMore, getSeverityVariant, getChangeIcon, onNavigate }: ChangesListProps) {
+  const observerTarget = useRef<HTMLDivElement>(null)
+
+  const handleObserver = useCallback((entries: IntersectionObserverEntry[]) => {
+    const [target] = entries
+    if (target.isIntersecting && hasMore && !loadingMore) {
+      onLoadMore()
+    }
+  }, [hasMore, loadingMore, onLoadMore])
+
+  useEffect(() => {
+    const element = observerTarget.current
+    if (!element) return
+
+    const observer = new IntersectionObserver(handleObserver, {
+      root: null,
+      rootMargin: '100px',
+      threshold: 0.1
+    })
+
+    observer.observe(element)
+
+    return () => {
+      if (element) {
+        observer.unobserve(element)
+      }
+    }
+  }, [handleObserver])
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -184,7 +314,7 @@ function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: Ch
                   <CardDescription className="capitalize">{change.type.replace(/_/g, ' ')}</CardDescription>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant={getSeverityVariant(change.severity) as 'high' | 'medium' | 'low' | 'info'} className="capitalize">
                   {change.severity}
                 </Badge>
@@ -195,10 +325,22 @@ function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: Ch
             </div>
           </CardHeader>
           <CardContent className="pt-0">
+            {change.endpoint && (
+              <div className="mb-2">
+                <button
+                  onClick={() => onNavigate?.('explorer', { endpoint: change.endpoint })}
+                  className="inline-flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md transition-colors"
+                >
+                  <Code className="h-3 w-3 text-primary" />
+                  <span className="font-medium">{formatEndpointName(change.endpoint)}</span>
+                  <span className="text-muted-foreground font-mono">{change.endpoint}</span>
+                </button>
+              </div>
+            )}
             {change.summary && (
               <p className="text-sm text-muted-foreground mb-2">{change.summary}</p>
             )}
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
               <span>Detected: {formatDate(change.detected_at)}</span>
               <span>{formatRelativeTime(change.detected_at)}</span>
               {change.category && <Badge variant="outline" className="text-xs">{change.category}</Badge>}
@@ -206,6 +348,24 @@ function ChangesList({ changes, loading, getSeverityVariant, getChangeIcon }: Ch
           </CardContent>
         </Card>
       ))}
+
+      {/* Infinite scroll observer target */}
+      <div ref={observerTarget} className="h-4" />
+
+      {/* Loading indicator */}
+      {loadingMore && (
+        <div className="flex items-center justify-center py-8">
+          <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+          <span className="ml-3 text-sm text-muted-foreground">Loading more changes...</span>
+        </div>
+      )}
+
+      {/* End of list indicator */}
+      {!hasMore && changes.length > 0 && (
+        <div className="flex items-center justify-center py-8">
+          <span className="text-sm text-muted-foreground">No more changes to load</span>
+        </div>
+      )}
     </div>
   )
 }

@@ -16,21 +16,25 @@ function formatEndpointName(endpoint: string): string {
     .join(' ')
 }
 
+interface ComparisonChange {
+  change: {
+    change_type: string
+    field_path: string
+    old_value?: unknown
+    new_value?: unknown
+    severity?: string
+    endpoint?: string
+  }
+  endpoint?: string
+  maturity: string
+  ai_summary?: string
+  timeline?: string
+}
+
 interface ComparisonResult {
   source: string
   target: string
-  changes: Array<{
-    type: string
-    field: string
-    endpoint?: string
-    old_value?: unknown
-    new_value?: unknown
-    change?: {
-      change_type: string
-      field_path: string
-      endpoint?: string
-    }
-  }>
+  changes: ComparisonChange[]
   upcoming_features_count: number
 }
 
@@ -150,8 +154,8 @@ export function Compare() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <Card 
-          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all" 
+        <Card
+          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all"
           onClick={() => { setSource('preview'); setTarget('stable'); handleCompare() }}
         >
           <CardHeader>
@@ -164,8 +168,8 @@ export function Compare() {
           </CardHeader>
         </Card>
 
-        <Card 
-          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all" 
+        <Card
+          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all"
           onClick={() => { setSource('beta'); setTarget('stable'); handleCompare() }}
         >
           <CardHeader>
@@ -178,8 +182,8 @@ export function Compare() {
           </CardHeader>
         </Card>
 
-        <Card 
-          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all" 
+        <Card
+          className="card-hover cursor-pointer border-2 border-transparent hover:border-primary/20 transition-all"
           onClick={() => { setSource('beta'); setTarget('preview'); handleCompare() }}
         >
           <CardHeader>
@@ -219,19 +223,26 @@ export function Compare() {
               </div>
             ) : (
               <div className="space-y-3">
-                {result.changes.map((change, idx) => {
-                  const changeData = change.change || change
-                  const changeType = changeData.change_type || change.type || 'unknown'
-                  const fieldPath = changeData.field_path || change.field || 'N/A'
-                  const changeEndpoint = change.endpoint || changeData.endpoint || ''
+                {result.changes.filter(Boolean).map((item, idx) => {
+                  const changeEndpoint = item.endpoint || item.change?.endpoint || ''
 
                   return (
                     <div key={idx} className="p-4 border rounded-xl bg-gradient-to-r from-transparent to-muted/30 hover:to-muted/50 transition-colors">
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <Badge variant="outline" className="capitalize bg-background">
-                          {changeType.replace(/_/g, ' ')}
+                          {(item.change?.change_type || 'change').replace(/_/g, ' ')}
                         </Badge>
-                        <span className="font-mono text-sm font-medium">{fieldPath}</span>
+                        <span className="font-mono text-sm font-medium">{item.change?.field_path || 'unknown'}</span>
+                        {item.change?.severity && (
+                          <Badge variant={item.change.severity === 'high' ? 'destructive' : 'secondary'} className="text-xs">
+                            {item.change.severity}
+                          </Badge>
+                        )}
+                        {item.maturity && (
+                          <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700 border-purple-200">
+                            {item.maturity.replace(/_/g, ' ')}
+                          </Badge>
+                        )}
                         {changeEndpoint && (
                           <span className="inline-flex items-center gap-1 text-xs bg-slate-100 px-2 py-0.5 rounded-md">
                             <Code className="h-3 w-3 text-primary" />
@@ -239,25 +250,30 @@ export function Compare() {
                           </span>
                         )}
                       </div>
-                      {(change.old_value !== undefined || change.new_value !== undefined) && (
+                      {(item.change?.old_value !== undefined || item.change?.new_value !== undefined) && (
                         <div className="flex gap-4 text-sm">
-                          {change.old_value !== undefined && (
+                          {item.change?.old_value !== undefined && item.change.old_value !== null && (
                             <div className="flex-1">
                               <span className="text-muted-foreground">Old: </span>
-                              <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded">
-                                {JSON.stringify(change.old_value)}
+                              <code className="bg-red-50 text-red-700 px-2 py-0.5 rounded text-xs">
+                                {JSON.stringify(item.change.old_value)}
                               </code>
                             </div>
                           )}
-                          {change.new_value !== undefined && (
+                          {item.change?.new_value !== undefined && item.change.new_value !== null && (
                             <div className="flex-1">
                               <span className="text-muted-foreground">New: </span>
-                              <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded">
-                                {JSON.stringify(change.new_value)}
+                              <code className="bg-green-50 text-green-700 px-2 py-0.5 rounded text-xs">
+                                {typeof item.change.new_value === 'object'
+                                  ? JSON.stringify(item.change.new_value).slice(0, 100) + '...'
+                                  : JSON.stringify(item.change.new_value)}
                               </code>
                             </div>
                           )}
                         </div>
+                      )}
+                      {item.ai_summary && (
+                        <p className="text-sm text-muted-foreground mt-2">{item.ai_summary}</p>
                       )}
                     </div>
                   )

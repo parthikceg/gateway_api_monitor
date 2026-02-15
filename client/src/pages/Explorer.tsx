@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, ChevronDown, MessageSquare, Sparkles, Code } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,8 @@ interface Field {
   description?: string
   required?: boolean
   deprecated?: boolean
+  expandable?: boolean
+  expandableType?: string
   children?: Field[]
   availability?: 'stable' | 'preview' | 'beta' | 'all'
   enumValues?: string[]
@@ -37,10 +39,13 @@ interface ExplorerProps {
   initialEndpoint?: string
 }
 
+type ViewMode = 'object' | 'request' | 'response'
+
 export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
   const [snapshots, setSnapshots] = useState<{ stable?: Snapshot; preview?: Snapshot; beta?: Snapshot }>({})
   const [loading, setLoading] = useState(true)
   const [activeTier, setActiveTier] = useState(initialTier || 'stable')
+  const [viewMode, setViewMode] = useState<ViewMode>('object')
   const [availableEndpoints, setAvailableEndpoints] = useState<string[]>([])
   const [selectedEndpoint, setSelectedEndpoint] = useState<string>(initialEndpoint || '/v1/payment_intents')
   const [chatField, setChatField] = useState<{
@@ -50,11 +55,7 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
     tier?: string
     endpoint?: string
   } | null>(null)
-  const [fieldAvailability, setFieldAvailability] = useState<{
-    beta_only: string[]
-    preview_only: string[]
-    enum_diff: Record<string, { beta_new: string[]; preview_new: string[] }>
-  }>({ beta_only: [], preview_only: [], enum_diff: {} })
+  // fieldAvailability is computed via useMemo below (after getSchemaForView is defined)
 
   useEffect(() => {
     if (initialTier) {
@@ -121,35 +122,6 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
       }
 
       setSnapshots(snapshots)
-
-      const stableFields = new Set(parseSchemaFieldNames(snapshots.stable?.schema_data))
-      const previewFields = new Set(parseSchemaFieldNames(snapshots.preview?.schema_data))
-      const betaFields = new Set(parseSchemaFieldNames(snapshots.beta?.schema_data))
-
-      const betaOnly = [...betaFields].filter(f => !stableFields.has(f) && !previewFields.has(f))
-      const previewOnly = [...previewFields].filter(f => !stableFields.has(f))
-
-      const stableEnums = parseSchemaEnumValues(snapshots.stable?.schema_data)
-      const previewEnums = parseSchemaEnumValues(snapshots.preview?.schema_data)
-      const betaEnums = parseSchemaEnumValues(snapshots.beta?.schema_data)
-      
-      const enumDiff: Record<string, { beta_new: string[]; preview_new: string[] }> = {}
-      
-      const allFieldNames = new Set([...Object.keys(stableEnums), ...Object.keys(previewEnums), ...Object.keys(betaEnums)])
-      allFieldNames.forEach(fieldName => {
-        const stableVals = new Set(stableEnums[fieldName] || [])
-        const previewVals = previewEnums[fieldName] || []
-        const betaVals = betaEnums[fieldName] || []
-        
-        const previewNew = previewVals.filter(v => !stableVals.has(v))
-        const betaNew = betaVals.filter(v => !stableVals.has(v))
-        
-        if (previewNew.length > 0 || betaNew.length > 0) {
-          enumDiff[fieldName] = { beta_new: betaNew, preview_new: previewNew }
-        }
-      })
-
-      setFieldAvailability({ beta_only: betaOnly, preview_only: previewOnly, enum_diff: enumDiff })
     } catch (error) {
       console.error('Failed to load snapshots:', error)
     } finally {
@@ -238,11 +210,16 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
       const fieldDef = value as Record<string, unknown>
       const fieldPath = prefix ? `${prefix}.${name}` : name
       let availability: Field['availability'] = 'all'
-      
-      if (fieldAvailability.beta_only.includes(fieldPath)) {
-        availability = 'beta'
-      } else if (fieldAvailability.preview_only.includes(fieldPath)) {
-        availability = 'preview'
+
+      if (tier === 'beta') {
+        // In beta tab: any field not in stable is a beta-tier feature
+        if (fieldAvailability.beta_only.includes(fieldPath) || fieldAvailability.preview_only.includes(fieldPath)) {
+          availability = 'beta'
+        }
+      } else if (tier === 'preview') {
+        if (fieldAvailability.preview_only.includes(fieldPath)) {
+          availability = 'preview'
+        }
       }
 
       let enumValues: string[] | undefined
@@ -277,6 +254,8 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
         description: fieldDef.description as string | undefined,
         required: required.includes(name),
         deprecated: fieldDef.deprecated as boolean | undefined,
+        expandable: fieldDef._expandable as boolean | undefined,
+        expandableType: fieldDef._expandable_type as string | undefined,
         children,
         availability,
         enumValues,
@@ -285,9 +264,76 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
     })
   }
 
-  const stableFields = parseSchemaToFields(snapshots.stable?.schema_data, 'stable')
-  const previewFields = parseSchemaToFields(snapshots.preview?.schema_data, 'preview')
-  const betaFields = parseSchemaToFields(snapshots.beta?.schema_data, 'beta')
+  // Select the right property set based on view mode
+  function getSchemaForView(schemaData: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!schemaData) return undefined
+    if (viewMode === 'object') {
+      const objProps = schemaData.object_properties as Record<string, unknown> | undefined
+      if (objProps && Object.keys(objProps).length > 0) {
+        return { properties: objProps, required: schemaData.object_required || [] }
+      }
+      // Fallback to full properties if object_properties not available (old snapshots)
+      return schemaData
+    }
+    if (viewMode === 'request') {
+      const reqProps = schemaData.request_properties as Record<string, unknown> | undefined
+      if (reqProps) {
+        // Strip 'request.' prefix from property names for cleaner display
+        const cleaned: Record<string, unknown> = {}
+        Object.entries(reqProps).forEach(([key, val]) => {
+          cleaned[key.replace(/^request\./, '')] = val
+        })
+        return { properties: cleaned, required: schemaData.required || [] }
+      }
+      return schemaData
+    }
+    if (viewMode === 'response') {
+      const resProps = schemaData.response_properties as Record<string, unknown> | undefined
+      if (resProps) {
+        // Strip 'response.' prefix from property names for cleaner display
+        const cleaned: Record<string, unknown> = {}
+        Object.entries(resProps).forEach(([key, val]) => {
+          cleaned[key.replace(/^response\./, '')] = val
+        })
+        return { properties: cleaned, required: schemaData.required || [] }
+      }
+      return schemaData
+    }
+    return schemaData
+  }
+
+  // Compute field availability using view-filtered schemas
+  const fieldAvailability = useMemo(() => {
+    const stableFieldNames = new Set(parseSchemaFieldNames(getSchemaForView(snapshots.stable?.schema_data)))
+    const previewFieldNames = new Set(parseSchemaFieldNames(getSchemaForView(snapshots.preview?.schema_data)))
+    const betaFieldNames = new Set(parseSchemaFieldNames(getSchemaForView(snapshots.beta?.schema_data)))
+
+    const beta_only = [...betaFieldNames].filter(f => !stableFieldNames.has(f) && !previewFieldNames.has(f))
+    const preview_only = [...previewFieldNames].filter(f => !stableFieldNames.has(f))
+
+    const stableEnums = parseSchemaEnumValues(getSchemaForView(snapshots.stable?.schema_data))
+    const previewEnums = parseSchemaEnumValues(getSchemaForView(snapshots.preview?.schema_data))
+    const betaEnums = parseSchemaEnumValues(getSchemaForView(snapshots.beta?.schema_data))
+
+    const enum_diff: Record<string, { beta_new: string[]; preview_new: string[] }> = {}
+    const allFieldNames = new Set([...Object.keys(stableEnums), ...Object.keys(previewEnums), ...Object.keys(betaEnums)])
+    allFieldNames.forEach(fieldName => {
+      const stableVals = new Set(stableEnums[fieldName] || [])
+      const previewVals = previewEnums[fieldName] || []
+      const betaVals = betaEnums[fieldName] || []
+      const previewNew = previewVals.filter(v => !stableVals.has(v))
+      const betaNew = betaVals.filter(v => !stableVals.has(v))
+      if (previewNew.length > 0 || betaNew.length > 0) {
+        enum_diff[fieldName] = { beta_new: betaNew, preview_new: previewNew }
+      }
+    })
+
+    return { beta_only, preview_only, enum_diff }
+  }, [snapshots, viewMode])
+
+  const stableFields = parseSchemaToFields(getSchemaForView(snapshots.stable?.schema_data), 'stable')
+  const previewFields = parseSchemaToFields(getSchemaForView(snapshots.preview?.schema_data), 'preview')
+  const betaFields = parseSchemaToFields(getSchemaForView(snapshots.beta?.schema_data), 'beta')
 
   if (loading) {
     return (
@@ -324,18 +370,41 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
         </div>
       </div>
 
-      <div className="flex gap-4 flex-wrap">
-        <div className="flex items-center gap-2 text-sm">
-          <div className="w-3 h-3 rounded field-beta-only" />
-          <span className="text-muted-foreground">Beta Only</span>
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div className="flex gap-4 flex-wrap">
+          <div className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 rounded field-beta-only" />
+            <span className="text-muted-foreground">Beta Only</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 rounded field-preview-only" />
+            <span className="text-muted-foreground">Preview Only</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <div className="w-3 h-3 rounded bg-gradient-to-r from-amber-100 to-orange-100 border border-orange-200" />
+            <span className="text-muted-foreground">Has New Values</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <div className="w-3 h-3 rounded field-preview-only" />
-          <span className="text-muted-foreground">Preview Only</span>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <div className="w-3 h-3 rounded bg-gradient-to-r from-amber-100 to-orange-100 border border-orange-200" />
-          <span className="text-muted-foreground">Has New Values</span>
+
+        {/* View Mode Selector */}
+        <div className="flex items-center rounded-lg border bg-muted/50 p-0.5">
+          {([
+            { value: 'object' as ViewMode, label: 'Object' },
+            { value: 'request' as ViewMode, label: 'Request' },
+          ]).map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setViewMode(value)}
+              className={cn(
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-all",
+                viewMode === value
+                  ? "bg-white text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -359,6 +428,7 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
           <FieldExplorer
             fields={stableFields}
             tier="stable"
+            viewMode={viewMode}
             endpoint={selectedEndpoint}
             fieldAvailability={fieldAvailability}
             onAskAI={(field) => setChatField({ ...field, tier: 'stable', endpoint: selectedEndpoint })}
@@ -369,6 +439,7 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
           <FieldExplorer
             fields={previewFields}
             tier="preview"
+            viewMode={viewMode}
             endpoint={selectedEndpoint}
             fieldAvailability={fieldAvailability}
             onAskAI={(field) => setChatField({ ...field, tier: 'preview', endpoint: selectedEndpoint })}
@@ -379,6 +450,7 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
           <FieldExplorer
             fields={betaFields}
             tier="beta"
+            viewMode={viewMode}
             endpoint={selectedEndpoint}
             fieldAvailability={fieldAvailability}
             onAskAI={(field) => setChatField({ ...field, tier: 'beta', endpoint: selectedEndpoint })}
@@ -397,12 +469,13 @@ export function Explorer({ initialTier, initialEndpoint }: ExplorerProps) {
 interface FieldExplorerProps {
   fields: Field[]
   tier: string
+  viewMode: ViewMode
   endpoint: string
   fieldAvailability: { beta_only: string[]; preview_only: string[] }
   onAskAI: (field: { name: string; type: string; description?: string }) => void
 }
 
-function FieldExplorer({ fields, tier, endpoint, fieldAvailability, onAskAI }: FieldExplorerProps) {
+function FieldExplorer({ fields, tier, viewMode, endpoint, fieldAvailability, onAskAI }: FieldExplorerProps) {
   if (fields.length === 0) {
     return (
       <Card>
@@ -420,24 +493,32 @@ function FieldExplorer({ fields, tier, endpoint, fieldAvailability, onAskAI }: F
         <CardTitle className="flex items-center gap-2">
           <Code className="h-5 w-5 text-primary" />
           {formatEndpointName(endpoint)}
+          {viewMode !== 'object' && (
+            <Badge variant="outline" className="text-xs ml-1">
+              {viewMode === 'request' ? 'Request Parameters' : 'Response Fields'}
+            </Badge>
+          )}
         </CardTitle>
         <CardDescription>
           <span className="font-mono text-xs">{endpoint}</span>
           <span className="mx-2">•</span>
-          Stripe API object structure for {tier} tier
+          {viewMode === 'object' && `The ${formatEndpointName(endpoint).replace(/s$/, '')} object for ${tier} tier`}
+          {viewMode === 'request' && `Request parameters for ${tier} tier`}
+          {viewMode === 'response' && `Response structure for ${tier} tier`}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <ScrollArea className="h-[500px]">
           <div className="space-y-1">
             {fields.map((field) => (
-              <FieldRow 
-                key={field.name} 
-                field={field} 
+              <FieldRow
+                key={field.name}
+                field={field}
                 depth={0}
                 fieldPath={field.name}
+                tier={tier}
                 fieldAvailability={fieldAvailability}
-                onAskAI={onAskAI} 
+                onAskAI={onAskAI}
               />
             ))}
           </div>
@@ -451,17 +532,20 @@ interface FieldRowProps {
   field: Field
   depth: number
   fieldPath: string
+  tier: string
   fieldAvailability: { beta_only: string[]; preview_only: string[] }
   onAskAI: (field: { name: string; type: string; description?: string }) => void
 }
 
-function FieldRow({ field, depth, fieldPath, fieldAvailability, onAskAI }: FieldRowProps) {
+function FieldRow({ field, depth, fieldPath, tier, fieldAvailability, onAskAI }: FieldRowProps) {
   const [expanded, setExpanded] = useState(false)
   const [showAllEnums, setShowAllEnums] = useState(false)
   const hasChildren = field.children && field.children.length > 0
-  
-  const isBetaOnly = fieldAvailability.beta_only.includes(fieldPath)
-  const isPreviewOnly = fieldAvailability.preview_only.includes(fieldPath)
+
+  // Tier-contextual availability: in beta tab, any field not in stable shows as beta
+  const isNotInStable = fieldAvailability.beta_only.includes(fieldPath) || fieldAvailability.preview_only.includes(fieldPath)
+  const isBetaOnly = tier === 'beta' ? isNotInStable : fieldAvailability.beta_only.includes(fieldPath)
+  const isPreviewOnly = tier === 'beta' ? false : fieldAvailability.preview_only.includes(fieldPath)
   const hasEnumValues = field.enumValues && field.enumValues.length > 0
   const newValuesSet = new Set(field.newEnumValues || [])
 
@@ -495,6 +579,12 @@ function FieldRow({ field, depth, fieldPath, fieldAvailability, onAskAI }: Field
         
         {field.deprecated && (
           <Badge variant="secondary" className="text-xs line-through">deprecated</Badge>
+        )}
+
+        {field.expandable && (
+          <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+            Expandable{field.expandableType ? ` → ${field.expandableType.replace(/_/g, ' ')}` : ''}
+          </Badge>
         )}
 
         {isBetaOnly && (
@@ -584,13 +674,14 @@ function FieldRow({ field, depth, fieldPath, fieldAvailability, onAskAI }: Field
       {expanded && hasChildren && (
         <div>
           {field.children!.map((child) => (
-            <FieldRow 
-              key={child.name} 
-              field={child} 
+            <FieldRow
+              key={child.name}
+              field={child}
               depth={depth + 1}
               fieldPath={fieldPath ? `${fieldPath}.${child.name}` : child.name}
+              tier={tier}
               fieldAvailability={fieldAvailability}
-              onAskAI={onAskAI} 
+              onAskAI={onAskAI}
             />
           ))}
         </div>

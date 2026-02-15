@@ -1,4 +1,9 @@
-const API_BASE = '/api'
+// Determine API base URL based on environment
+// - Replit/local: uses /api prefix (FastAPI root_path="/api")
+// - AWS EB: no prefix needed (FastAPI root_path="")
+const isAWS = window.location.hostname.includes('elasticbeanstalk') ||
+              window.location.hostname.includes('amazonaws')
+const API_BASE = isAWS ? '' : '/api'
 
 export interface Change {
   id: string
@@ -10,6 +15,8 @@ export interface Change {
   maturity: string | null
   tier: string
   summary: string | null
+  old_value: string | null
+  new_value: string | null
   detected_at: string
 }
 
@@ -58,7 +65,7 @@ export const api = {
 
   getEndpoints: () => fetchApi<EndpointsResponse>('/endpoints'),
 
-  getChanges: (params?: { limit?: number; offset?: number; severity?: string; tier?: string; maturity?: string; endpoint?: string }) => {
+  getChanges: (params?: { limit?: number; offset?: number; severity?: string; tier?: string; maturity?: string; endpoint?: string; schema_type?: string; date_from?: string; date_to?: string }) => {
     const searchParams = new URLSearchParams()
     if (params?.limit) searchParams.set('limit', params.limit.toString())
     if (params?.offset) searchParams.set('offset', params.offset.toString())
@@ -66,6 +73,9 @@ export const api = {
     if (params?.tier) searchParams.set('tier', params.tier)
     if (params?.maturity) searchParams.set('maturity', params.maturity)
     if (params?.endpoint) searchParams.set('endpoint', params.endpoint)
+    if (params?.schema_type) searchParams.set('schema_type', params.schema_type)
+    if (params?.date_from) searchParams.set('date_from', params.date_from)
+    if (params?.date_to) searchParams.set('date_to', params.date_to)
     const query = searchParams.toString()
     return fetchApi<{ changes: Change[]; total: number; offset: number; limit: number; has_more: boolean }>(`/changes${query ? `?${query}` : ''}`)
   },

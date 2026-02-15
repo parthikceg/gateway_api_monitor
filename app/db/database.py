@@ -1,8 +1,11 @@
 """Database configuration and session management"""
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import get_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -11,6 +14,14 @@ engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,  # Verify connections before using
     pool_recycle=300,    # Recycle connections every 5 minutes
+    pool_size=5,
+    max_overflow=10,
+    connect_args={
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    },
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -27,6 +38,45 @@ def get_db():
         db.close()
 
 
+def _migrate_maturity_to_string():
+    """Convert change_maturity column from native PG enum to VARCHAR.
+
+    Native PG enums cache type metadata in connections, causing persistent
+    'invalid input value' errors when new values are added. A plain VARCHAR
+    column avoids this entirely while the Python ChangeMaturity enum still
+    provides application-level type safety.
+    """
+    raw_conn = engine.raw_connection()
+    try:
+        raw_conn.autocommit = True
+        cursor = raw_conn.cursor()
+
+        # Check if column is still using the native enum type
+        cursor.execute(
+            "SELECT data_type FROM information_schema.columns "
+            "WHERE table_name = 'changes' AND column_name = 'change_maturity'"
+        )
+        row = cursor.fetchone()
+        if row and row[0] == 'USER-DEFINED':
+            logger.info("Migrating change_maturity from native enum to VARCHAR...")
+            cursor.execute(
+                "ALTER TABLE changes ALTER COLUMN change_maturity "
+                "TYPE VARCHAR USING change_maturity::text"
+            )
+            logger.info("Successfully migrated change_maturity to VARCHAR")
+        elif row:
+            logger.info(f"change_maturity is already {row[0]}, no migration needed")
+        else:
+            logger.info("changes table or change_maturity column not found yet, will be created as VARCHAR")
+
+        cursor.close()
+    except Exception as e:
+        logger.error(f"Maturity column migration error: {e}")
+    finally:
+        raw_conn.close()
+
+
 def init_db():
     """Initialize database tables"""
+    _migrate_maturity_to_string()
     Base.metadata.create_all(bind=engine)

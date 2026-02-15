@@ -2,11 +2,16 @@
 from dotenv import load_dotenv
 load_dotenv()  # Load .env file before any other imports that use env vars
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime
 import logging
+import os
+from pathlib import Path
 
 from app.config import get_settings
 from app.db.database import get_db, init_db
@@ -22,11 +27,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# Determine if running on AWS EB (no root_path needed) or Replit (needs /api prefix)
+is_aws = os.environ.get("DB_PROVIDER") == "aws"
+root_path = "" if is_aws else "/api"
+
 app = FastAPI(
     title="Gateway Monitor API",
     description="Monitor Stripe API changes automatically across multiple tiers",
     version="2.0.0",
-    root_path="/api",
+    root_path=root_path,
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/openapi.json"
@@ -57,9 +67,29 @@ async def shutdown_event():
     stop_scheduler()
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    from app.services.stripe_crawler import StripeCrawler
+    crawler = StripeCrawler()
+    return {
+        "status": "healthy",
+        "service": "Gateway Monitor",
+        "version": "2.0.0",
+        "tiers": ["stable", "preview", "beta"],
+        "monitored_endpoints": crawler.get_monitored_endpoints()
+    }
+
+
 @app.get("/")
 async def root():
-    """Health check endpoint"""
+    """Serve React app on AWS, health check on Replit"""
+    if is_aws:
+        # On AWS, serve React frontend
+        index_file = Path(__file__).parent.parent / "client" / "dist" / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+    # On Replit, return health check
     from app.services.stripe_crawler import StripeCrawler
     crawler = StripeCrawler()
     return {
@@ -117,6 +147,16 @@ async def run_monitoring(
     except Exception as e:
         logger.error(f"Monitoring failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/monitor/reset-db")
+async def reset_db(db: Session = Depends(get_db)):
+    """Delete all changes and snapshots for a clean baseline run"""
+    changes_deleted = db.query(Change).delete()
+    snapshots_deleted = db.query(Snapshot).delete()
+    db.commit()
+    logger.info(f"DB reset: {changes_deleted} changes, {snapshots_deleted} snapshots deleted")
+    return {"status": "ok", "changes_deleted": changes_deleted, "snapshots_deleted": snapshots_deleted}
 
 
 @app.get("/monitor/compare")
@@ -260,6 +300,9 @@ async def get_changes(
     tier: Optional[str] = None,
     maturity: Optional[str] = None,
     endpoint: Optional[str] = None,
+    schema_type: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -270,8 +313,11 @@ async def get_changes(
     - offset: Number of changes to skip (default: 0)
     - severity: Filter by severity - 'high', 'medium', 'low', 'info'
     - tier: Filter by tier - 'stable', 'preview', 'beta'
-    - maturity: Filter by maturity - 'stable_change', 'new_preview', 'new_beta', etc.
+    - maturity: Filter by maturity - 'stable_change', 'cross_tier_preview', etc.
     - endpoint: Filter by endpoint path - e.g., '/v1/payment_methods'
+    - schema_type: Filter by schema type - 'object' or 'request'
+    - date_from: Filter changes detected on or after this datetime (ISO format)
+    - date_to: Filter changes detected on or before this datetime (ISO format)
     """
     query = db.query(Change).join(Snapshot)
 
@@ -285,14 +331,34 @@ async def get_changes(
         query = query.filter(Snapshot.spec_type == spec_type_enum)
 
     if maturity:
-        try:
-            maturity_enum = ChangeMaturity[maturity.upper()]
-            query = query.filter(Change.change_maturity == maturity_enum)
-        except KeyError:
+        # change_maturity is now a plain String column — filter directly
+        valid = {m.value for m in ChangeMaturity}
+        if maturity not in valid:
             raise HTTPException(status_code=400, detail="Invalid maturity level")
+        query = query.filter(Change.change_maturity == maturity)
 
     if endpoint:
         query = query.filter(Snapshot.endpoint_path == endpoint)
+
+    if schema_type:
+        if schema_type == "object":
+            query = query.filter(Change.field_path.like("object.%") | Change.field_path.like("properties.object.%") | Change.field_path.like("required.object.%"))
+        elif schema_type == "request":
+            query = query.filter(Change.field_path.like("request.%") | Change.field_path.like("properties.request.%") | Change.field_path.like("required.request.%"))
+
+    if date_from:
+        try:
+            dt_from = datetime.fromisoformat(date_from)
+            query = query.filter(Change.detected_at >= dt_from)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date_from format")
+
+    if date_to:
+        try:
+            dt_to = datetime.fromisoformat(date_to)
+            query = query.filter(Change.detected_at <= dt_to)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date_to format")
 
     # Get total count before pagination
     total_count = query.count()
@@ -309,9 +375,11 @@ async def get_changes(
                 "endpoint": c.snapshot.endpoint_path if c.snapshot else "N/A",
                 "severity": c.severity,
                 "category": c.change_category,
-                "maturity": c.change_maturity.value if c.change_maturity else None,
+                "maturity": c.change_maturity,
                 "tier": c.snapshot.spec_type.value,
                 "summary": c.ai_summary,
+                "old_value": c.old_value,
+                "new_value": c.new_value,
                 "detected_at": c.detected_at.isoformat()
             }
             for c in changes
@@ -572,3 +640,33 @@ async def test_email(email: str, name: str = "Test User"):
     except Exception as e:
         logger.error(f"Test email failed: {e}")
         return {"status": "error", "message": str(e)}
+
+
+# ============================================================================
+# STATIC FILE SERVING (for AWS EB deployment)
+# ============================================================================
+
+# Serve React static files in production (AWS EB)
+# The client/dist folder contains the built React app
+static_dir = Path(__file__).parent.parent / "client" / "dist"
+
+if static_dir.exists() and is_aws:
+    logger.info(f"Mounting static files from: {static_dir}")
+
+    # Mount static assets (JS, CSS, images)
+    assets_dir = static_dir / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    # Serve index.html for all non-API routes (React SPA routing)
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve React app for all non-API routes"""
+        # Don't serve SPA for API documentation paths
+        if full_path in ["docs", "redoc", "openapi.json"]:
+            return None
+
+        index_file = static_dir / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        raise HTTPException(status_code=404, detail="Frontend not found")

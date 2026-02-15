@@ -15,11 +15,18 @@ class SpecType(enum.Enum):
 
 class ChangeMaturity(enum.Enum):
     """Change maturity classification"""
+    # Within-tier temporal changes (current vs previous snapshot)
     STABLE_CHANGE = "stable_change"           # Change in GA version
+    PREVIEW_CHANGE = "preview_change"         # Change in preview version
+    BETA_CHANGE = "beta_change"               # Change in beta version
+    # Cross-tier static differences (what's different between tiers)
+    CROSS_TIER_PREVIEW = "cross_tier_preview" # In preview but not stable
+    CROSS_TIER_BETA = "cross_tier_beta"       # In beta but not stable
+    # Legacy values (kept for DB compatibility)
     PREVIEW_TO_STABLE = "preview_to_stable"   # Preview feature going GA
     BETA_TO_PREVIEW = "beta_to_preview"       # Beta moving to preview
-    NEW_PREVIEW = "new_preview"               # New in preview
-    NEW_BETA = "new_beta"                     # New in beta
+    NEW_PREVIEW = "new_preview"               # Legacy: use CROSS_TIER_PREVIEW
+    NEW_BETA = "new_beta"                     # Legacy: use CROSS_TIER_BETA
 
 class Snapshot(Base):
     __tablename__ = "snapshots"
@@ -46,7 +53,7 @@ class Change(Base):
     new_value = Column(Text, nullable=True)
     severity = Column(String, nullable=False)
     change_category = Column(String, nullable=True)
-    change_maturity = Column(SQLEnum(ChangeMaturity), nullable=True)
+    change_maturity = Column(String, nullable=True)
     ai_summary = Column(Text, nullable=True)
     detected_at = Column(DateTime, default=datetime.utcnow)
     

@@ -33,8 +33,11 @@ export function Changes({ initialSeverity, initialTier, initialEndpoint, onNavig
   const [availableEndpoints, setAvailableEndpoints] = useState<string[]>([])
   const [filters, setFilters] = useState({
     severity: initialSeverity || '',
-    tier: initialTier || '',
+    maturity: initialTier ? ({ stable: 'stable_change', preview: 'preview_change', beta: 'beta_change' }[initialTier] || '') : '',
     endpoint: initialEndpoint || '',
+    schema_type: '',
+    date_from: '',
+    date_to: '',
   })
   const [offset, setOffset] = useState(0)
   const limit = 20
@@ -82,13 +85,16 @@ export function Changes({ initialSeverity, initialTier, initialEndpoint, onNavig
     }
 
     try {
-      const params: { limit: number; offset: number; severity?: string; tier?: string; endpoint?: string } = {
+      const params: { limit: number; offset: number; severity?: string; maturity?: string; endpoint?: string; schema_type?: string; date_from?: string; date_to?: string } = {
         limit,
         offset: currentOffset
       }
       if (filters.severity) params.severity = filters.severity
-      if (filters.tier) params.tier = filters.tier
+      if (filters.maturity) params.maturity = filters.maturity
       if (filters.endpoint) params.endpoint = filters.endpoint
+      if (filters.schema_type) params.schema_type = filters.schema_type
+      if (filters.date_from) params.date_from = new Date(filters.date_from).toISOString()
+      if (filters.date_to) params.date_to = new Date(filters.date_to).toISOString()
 
       const res = await api.getChanges(params)
 
@@ -176,15 +182,17 @@ export function Changes({ initialSeverity, initialTier, initialEndpoint, onNavig
             </SelectContent>
           </Select>
 
-          <Select value={filters.tier || "all"} onValueChange={(value) => setFilters(f => ({ ...f, tier: value === "all" ? "" : value }))}>
-            <SelectTrigger className="w-[130px]">
-              <SelectValue placeholder="Tier" />
+          <Select value={filters.maturity || "all"} onValueChange={(value) => setFilters(f => ({ ...f, maturity: value === "all" ? "" : value }))}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Change Type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Tiers</SelectItem>
-              <SelectItem value="stable">Stable</SelectItem>
-              <SelectItem value="preview">Preview</SelectItem>
-              <SelectItem value="beta">Beta</SelectItem>
+              <SelectItem value="all">All Types</SelectItem>
+              <SelectItem value="stable_change">Stable vs Previous</SelectItem>
+              <SelectItem value="preview_change">Preview vs Previous</SelectItem>
+              <SelectItem value="beta_change">Beta vs Previous</SelectItem>
+              <SelectItem value="cross_tier_preview">Stable ↔ Preview</SelectItem>
+              <SelectItem value="cross_tier_beta">Stable ↔ Beta</SelectItem>
             </SelectContent>
           </Select>
 
@@ -202,8 +210,39 @@ export function Changes({ initialSeverity, initialTier, initialEndpoint, onNavig
             </SelectContent>
           </Select>
 
-          {(filters.severity || filters.tier || filters.endpoint) && (
-            <Button variant="ghost" size="sm" onClick={() => setFilters({ severity: '', tier: '', endpoint: '' })}>
+          <Select value={filters.schema_type || "all"} onValueChange={(value) => setFilters(f => ({ ...f, schema_type: value === "all" ? "" : value }))}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Schema" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Schemas</SelectItem>
+              <SelectItem value="object">Object</SelectItem>
+              <SelectItem value="request">Request</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">From:</span>
+            <input
+              type="datetime-local"
+              value={filters.date_from}
+              onChange={(e) => setFilters(f => ({ ...f, date_from: e.target.value }))}
+              className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">To:</span>
+            <input
+              type="datetime-local"
+              value={filters.date_to}
+              onChange={(e) => setFilters(f => ({ ...f, date_to: e.target.value }))}
+              className="h-9 rounded-md border border-input bg-background px-2 py-1 text-sm shadow-sm"
+            />
+          </div>
+
+          {(filters.severity || filters.maturity || filters.endpoint || filters.schema_type || filters.date_from || filters.date_to) && (
+            <Button variant="ghost" size="sm" onClick={() => setFilters({ severity: '', maturity: '', endpoint: '', schema_type: '', date_from: '', date_to: '' })}>
               Clear filters
             </Button>
           )}
@@ -318,8 +357,14 @@ function ChangesList({ changes, loading, loadingMore, hasMore, onLoadMore, getSe
                 <Badge variant={getSeverityVariant(change.severity) as 'high' | 'medium' | 'low' | 'info'} className="capitalize">
                   {change.severity}
                 </Badge>
-                <span className={`badge-${change.tier} px-2.5 py-1 rounded-full text-xs font-semibold capitalize`}>
-                  {change.tier}
+                <span className={`badge-${change.tier} px-2.5 py-1 rounded-full text-xs font-semibold`}>
+                  {change.maturity ? ({
+                    stable_change: 'Stable',
+                    preview_change: 'Preview',
+                    beta_change: 'Beta',
+                    cross_tier_preview: 'Stable ↔ Preview',
+                    cross_tier_beta: 'Stable ↔ Beta',
+                  }[change.maturity] || change.tier) : change.tier}
                 </span>
               </div>
             </div>
@@ -328,7 +373,7 @@ function ChangesList({ changes, loading, loadingMore, hasMore, onLoadMore, getSe
             {change.endpoint && (
               <div className="mb-2">
                 <button
-                  onClick={() => onNavigate?.('explorer', { endpoint: change.endpoint })}
+                  onClick={() => onNavigate?.('explorer', { endpoint: change.endpoint! })}
                   className="inline-flex items-center gap-1.5 text-xs bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md transition-colors"
                 >
                   <Code className="h-3 w-3 text-primary" />
@@ -339,6 +384,20 @@ function ChangesList({ changes, loading, loadingMore, hasMore, onLoadMore, getSe
             )}
             {change.summary && (
               <p className="text-sm text-muted-foreground mb-2">{change.summary}</p>
+            )}
+            {(change.old_value || change.new_value) && (
+              <div className="mb-3 p-2 bg-slate-50 rounded-md border border-slate-200">
+                <div className="text-xs font-medium text-slate-500 mb-1">Value Change:</div>
+                <div className="flex items-center gap-2 font-mono text-sm">
+                  <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded line-through">
+                    {change.old_value || '(empty)'}
+                  </span>
+                  <span className="text-slate-400">→</span>
+                  <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                    {change.new_value || '(empty)'}
+                  </span>
+                </div>
+              </div>
             )}
             <div className="flex items-center gap-4 text-xs text-muted-foreground flex-wrap">
               <span>Detected: {formatDate(change.detected_at)}</span>

@@ -46,28 +46,27 @@ def _migrate_maturity_to_string():
     column avoids this entirely while the Python ChangeMaturity enum still
     provides application-level type safety.
     """
+    logger.info("Running maturity column migration check...")
     raw_conn = engine.raw_connection()
     try:
         raw_conn.autocommit = True
         cursor = raw_conn.cursor()
 
-        # Check if column is still using the native enum type
-        cursor.execute(
-            "SELECT data_type FROM information_schema.columns "
-            "WHERE table_name = 'changes' AND column_name = 'change_maturity'"
-        )
-        row = cursor.fetchone()
-        if row and row[0] == 'USER-DEFINED':
-            logger.info("Migrating change_maturity from native enum to VARCHAR...")
+        # Direct approach: just try the ALTER. If column is already VARCHAR,
+        # the cast still succeeds (VARCHAR::text is a no-op). If table doesn't
+        # exist yet, it'll error and we catch it gracefully.
+        try:
             cursor.execute(
                 "ALTER TABLE changes ALTER COLUMN change_maturity "
-                "TYPE VARCHAR USING change_maturity::text"
+                "TYPE VARCHAR(100) USING change_maturity::text"
             )
-            logger.info("Successfully migrated change_maturity to VARCHAR")
-        elif row:
-            logger.info(f"change_maturity is already {row[0]}, no migration needed")
-        else:
-            logger.info("changes table or change_maturity column not found yet, will be created as VARCHAR")
+            logger.info("Successfully ensured change_maturity is VARCHAR")
+        except Exception as alter_err:
+            err_str = str(alter_err)
+            if 'does not exist' in err_str:
+                logger.info("changes table not found yet, will be created as VARCHAR")
+            else:
+                logger.error(f"ALTER TABLE failed: {alter_err}")
 
         cursor.close()
     except Exception as e:

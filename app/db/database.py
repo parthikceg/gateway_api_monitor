@@ -78,4 +78,5 @@ def _migrate_maturity_to_string():
 def init_db():
     """Initialize database tables"""
     _migrate_maturity_to_string()
+    engine.dispose()  # Force pool connections to refresh type metadata after column type change
     Base.metadata.create_all(bind=engine)

@@ -68,6 +68,13 @@ def _migrate_maturity_to_string():
             else:
                 logger.error(f"ALTER TABLE failed: {alter_err}")
 
+        # Drop the old native PG enum type so psycopg2 can never reference it
+        try:
+            cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
+            logger.info("Dropped old changematurity enum type")
+        except Exception as drop_err:
+            logger.warning(f"Could not drop old enum type: {drop_err}")
+
         cursor.close()
     except Exception as e:
         logger.error(f"Maturity column migration error: {e}")

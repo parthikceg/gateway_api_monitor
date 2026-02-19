@@ -38,52 +38,56 @@ def get_db():
         db.close()
 
 
-def _migrate_maturity_to_string():
-    """Convert change_maturity column from native PG enum to VARCHAR.
+def _nuke_enum_table():
+    """Nuclear fix: archive the old changes table and drop the enum type.
 
-    Native PG enums cache type metadata in connections, causing persistent
-    'invalid input value' errors when new values are added. A plain VARCHAR
-    column avoids this entirely while the Python ChangeMaturity enum still
-    provides application-level type safety.
+    The old 'changes' table has a native PG enum column that is deeply
+    embedded in PostgreSQL's type system and resists ALTER TABLE fixes.
+    Archiving the table and dropping the enum type guarantees a clean slate.
+    create_all() will recreate 'changes' with a plain String column.
     """
-    logger.info("Running maturity column migration check...")
+    logger.info("Running enum cleanup migration...")
     raw_conn = engine.raw_connection()
     try:
         raw_conn.autocommit = True
         cursor = raw_conn.cursor()
 
-        # Direct approach: just try the ALTER. If column is already VARCHAR,
-        # the cast still succeeds (VARCHAR::text is a no-op). If table doesn't
-        # exist yet, it'll error and we catch it gracefully.
-        try:
-            cursor.execute(
-                "ALTER TABLE changes ALTER COLUMN change_maturity "
-                "TYPE VARCHAR(100) USING change_maturity::text"
-            )
-            logger.info("Successfully ensured change_maturity is VARCHAR")
-        except Exception as alter_err:
-            err_str = str(alter_err)
-            if 'does not exist' in err_str:
-                logger.info("changes table not found yet, will be created as VARCHAR")
-            else:
-                logger.error(f"ALTER TABLE failed: {alter_err}")
+        # Check if the old enum type still exists
+        cursor.execute(
+            "SELECT 1 FROM pg_type WHERE typname = 'changematurity'"
+        )
+        has_enum = cursor.fetchone() is not None
 
-        # Drop the old native PG enum type so psycopg2 can never reference it
-        try:
-            cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
-            logger.info("Dropped old changematurity enum type")
-        except Exception as drop_err:
-            logger.warning(f"Could not drop old enum type: {drop_err}")
+        if has_enum:
+            logger.info("Found old changematurity enum type — archiving changes table")
+            # Archive the old table (preserves data)
+            try:
+                cursor.execute("ALTER TABLE changes RENAME TO changes_archived_enum")
+                logger.info("Archived old changes table to changes_archived_enum")
+            except Exception as rename_err:
+                if 'does not exist' in str(rename_err):
+                    logger.info("No changes table to archive")
+                else:
+                    logger.error(f"Could not archive changes table: {rename_err}")
+
+            # Drop the enum type completely
+            try:
+                cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
+                logger.info("Dropped changematurity enum type")
+            except Exception as drop_err:
+                logger.warning(f"Could not drop enum type: {drop_err}")
+        else:
+            logger.info("No changematurity enum type found — clean state")
 
         cursor.close()
     except Exception as e:
-        logger.error(f"Maturity column migration error: {e}")
+        logger.error(f"Enum cleanup migration error: {e}")
     finally:
         raw_conn.close()
 
 
 def init_db():
     """Initialize database tables"""
-    _migrate_maturity_to_string()
-    engine.dispose()  # Force pool connections to refresh type metadata after column type change
+    _nuke_enum_table()
+    engine.dispose()
     Base.metadata.create_all(bind=engine)

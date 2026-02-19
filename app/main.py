@@ -81,6 +81,64 @@ async def health_check():
     }
 
 
+@app.get("/debug/db-info")
+async def debug_db_info(db: Session = Depends(get_db)):
+    """Diagnostic endpoint: shows DB state for debugging enum issues"""
+    from app.db.database import engine
+    raw_conn = engine.raw_connection()
+    try:
+        raw_conn.autocommit = True
+        cursor = raw_conn.cursor()
+        info = {}
+
+        # Database info
+        cursor.execute("SELECT current_database(), current_user, version()")
+        row = cursor.fetchone()
+        info["database"] = row[0]
+        info["user"] = row[1]
+        info["pg_version"] = row[2][:80]
+
+        # Check enum type
+        cursor.execute("SELECT typname FROM pg_type WHERE typname LIKE '%maturity%'")
+        info["matching_types"] = [r[0] for r in cursor.fetchall()]
+
+        # Check enum values
+        cursor.execute("""
+            SELECT e.enumlabel FROM pg_enum e
+            JOIN pg_type t ON e.enumtypid = t.oid
+            WHERE t.typname = 'changematurity'
+            ORDER BY e.enumsortorder
+        """)
+        info["enum_values"] = [r[0] for r in cursor.fetchall()]
+
+        # Check column type
+        cursor.execute("""
+            SELECT data_type, udt_name FROM information_schema.columns
+            WHERE table_name = 'changes' AND column_name = 'change_maturity'
+        """)
+        col = cursor.fetchone()
+        info["column_type"] = {"data_type": col[0], "udt_name": col[1]} if col else None
+
+        # Check if tables exist
+        cursor.execute("""
+            SELECT tablename FROM pg_tables
+            WHERE schemaname = 'public' AND tablename LIKE 'changes%'
+        """)
+        info["changes_tables"] = [r[0] for r in cursor.fetchall()]
+
+        # Row count
+        try:
+            cursor.execute("SELECT COUNT(*) FROM changes")
+            info["changes_count"] = cursor.fetchone()[0]
+        except Exception:
+            info["changes_count"] = "table not accessible"
+
+        cursor.close()
+        return info
+    finally:
+        raw_conn.close()
+
+
 @app.get("/")
 async def root():
     """Serve React app on AWS, health check on Replit"""

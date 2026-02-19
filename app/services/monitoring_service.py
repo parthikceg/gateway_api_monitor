@@ -305,10 +305,13 @@ class MonitoringService:
         endpoints_to_compare = [endpoint_filter] if endpoint_filter else self.crawler.MONITORED_ENDPOINTS
 
         # Delete old cross-tier records for this maturity to avoid duplicates
+        # Use raw SQL with ::text cast to bypass PG enum type validation
         self._ensure_db_connection()
-        old_count = self.db.query(Change).filter(
-            Change.change_maturity == maturity
-        ).delete()
+        result = self.db.execute(
+            text("DELETE FROM changes WHERE change_maturity::text = :m"),
+            {"m": maturity}
+        )
+        old_count = result.rowcount
         self.db.commit()
         if old_count:
             logger.info(f"Cleared {old_count} old {maturity} cross-tier records")
@@ -348,21 +351,34 @@ class MonitoringService:
 
                     category = self.ai_analyzer.categorize_change(change_data)
 
-                    change_record = Change(
-                        snapshot_id=source_snapshot.id,
-                        change_type=change_data["change_type"],
-                        field_path=change_data["field_path"],
-                        old_value=old_val,
-                        new_value=new_val,
-                        severity=severity,
-                        change_category=category,
-                        change_maturity=maturity,
-                        ai_summary=None,
+                    # Use raw SQL INSERT to bypass PG enum type validation
+                    import uuid
+                    record_id = uuid.uuid4()
+                    self.db.execute(
+                        text("""
+                            INSERT INTO changes (id, snapshot_id, change_type, field_path,
+                                old_value, new_value, severity, change_category,
+                                change_maturity, ai_summary, detected_at)
+                            VALUES (:id, :snapshot_id, :change_type, :field_path,
+                                :old_value, :new_value, :severity, :change_category,
+                                :change_maturity, :ai_summary, :detected_at)
+                        """),
+                        {
+                            "id": str(record_id),
+                            "snapshot_id": str(source_snapshot.id),
+                            "change_type": change_data["change_type"],
+                            "field_path": change_data["field_path"],
+                            "old_value": old_val,
+                            "new_value": new_val,
+                            "severity": severity,
+                            "change_category": category,
+                            "change_maturity": maturity,
+                            "ai_summary": None,
+                            "detected_at": datetime.utcnow(),
+                        }
                     )
-                    self.db.add(change_record)
-                    self.db.flush()
 
-                    all_change_record_ids.append({"id": change_record.id, "data": change_data})
+                    all_change_record_ids.append({"id": record_id, "data": change_data})
                     all_analyzed_changes.append({
                         "change": change_data,
                         "endpoint": endpoint_path,

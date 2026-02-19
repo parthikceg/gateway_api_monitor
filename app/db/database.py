@@ -39,12 +39,12 @@ def get_db():
 
 
 def _nuke_enum_table():
-    """Nuclear fix: archive the old changes table and drop the enum type.
+    """Drop changes table and enum type if the old PG enum still exists.
 
-    The old 'changes' table has a native PG enum column that is deeply
-    embedded in PostgreSQL's type system and resists ALTER TABLE fixes.
-    Archiving the table and dropping the enum type guarantees a clean slate.
-    create_all() will recreate 'changes' with a plain String column.
+    Previous migration attempts (RENAME, ALTER TABLE, DROP TYPE) failed
+    because RENAME fails if the target name already exists. Simplest fix:
+    DROP TABLE + DROP TYPE, let create_all() recreate with String column.
+    Change data is regenerated on next monitoring run.
     """
     logger.info("Running enum cleanup migration...")
     raw_conn = engine.raw_connection()
@@ -59,25 +59,13 @@ def _nuke_enum_table():
         has_enum = cursor.fetchone() is not None
 
         if has_enum:
-            logger.info("Found old changematurity enum type — archiving changes table")
-            # Archive the old table (preserves data)
-            try:
-                cursor.execute("ALTER TABLE changes RENAME TO changes_archived_enum")
-                logger.info("Archived old changes table to changes_archived_enum")
-            except Exception as rename_err:
-                if 'does not exist' in str(rename_err):
-                    logger.info("No changes table to archive")
-                else:
-                    logger.error(f"Could not archive changes table: {rename_err}")
-
-            # Drop the enum type completely
-            try:
-                cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
-                logger.info("Dropped changematurity enum type")
-            except Exception as drop_err:
-                logger.warning(f"Could not drop enum type: {drop_err}")
+            logger.info("Found changematurity enum — dropping changes table and type")
+            cursor.execute("DROP TABLE IF EXISTS changes CASCADE")
+            cursor.execute("DROP TABLE IF EXISTS changes_archived_enum CASCADE")
+            cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
+            logger.info("Dropped changes table and changematurity enum type")
         else:
-            logger.info("No changematurity enum type found — clean state")
+            logger.info("No changematurity enum found — clean state")
 
         cursor.close()
     except Exception as e:

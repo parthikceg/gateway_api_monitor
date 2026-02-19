@@ -38,15 +38,15 @@ def get_db():
         db.close()
 
 
-def _nuke_enum_table():
-    """Drop changes table and enum type if the old PG enum still exists.
+def _fix_enum_issues():
+    """Fix changematurity enum issues with belt-and-suspenders approach.
 
-    Previous migration attempts (RENAME, ALTER TABLE, DROP TYPE) failed
-    because RENAME fails if the target name already exists. Simplest fix:
-    DROP TABLE + DROP TYPE, let create_all() recreate with String column.
-    Change data is regenerated on next monitoring run.
+    Strategy:
+    1. If enum exists, first ADD any missing values so queries work immediately
+    2. Then try to DROP TABLE + DROP TYPE for a clean String column
+    3. If DROP fails (permissions, locks, etc.), the added values ensure it works anyway
     """
-    logger.info("Running enum cleanup migration...")
+    logger.info("Running enum fix migration...")
     raw_conn = engine.raw_connection()
     try:
         raw_conn.autocommit = True
@@ -59,23 +59,39 @@ def _nuke_enum_table():
         has_enum = cursor.fetchone() is not None
 
         if has_enum:
-            logger.info("Found changematurity enum — dropping changes table and type")
-            cursor.execute("DROP TABLE IF EXISTS changes CASCADE")
-            cursor.execute("DROP TABLE IF EXISTS changes_archived_enum CASCADE")
-            cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
-            logger.info("Dropped changes table and changematurity enum type")
+            # STEP 1: Add missing values so queries work even if DROP fails
+            logger.info("Found changematurity enum — adding missing values as safety net")
+            required = ['stable_change', 'preview_change', 'beta_change',
+                        'cross_tier_preview', 'cross_tier_beta']
+            for val in required:
+                try:
+                    cursor.execute(
+                        f"ALTER TYPE changematurity ADD VALUE IF NOT EXISTS '{val}'"
+                    )
+                except Exception:
+                    pass  # Value already exists or PG < 9.3
+            logger.info("Ensured all enum values exist")
+
+            # STEP 2: Try to drop everything for a clean String column
+            try:
+                cursor.execute("DROP TABLE IF EXISTS changes CASCADE")
+                cursor.execute("DROP TABLE IF EXISTS changes_archived_enum CASCADE")
+                cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
+                logger.info("Dropped changes table and enum type — clean slate")
+            except Exception as drop_err:
+                logger.warning(f"DROP failed (enum values added as fallback): {drop_err}")
         else:
             logger.info("No changematurity enum found — clean state")
 
         cursor.close()
     except Exception as e:
-        logger.error(f"Enum cleanup migration error: {e}")
+        logger.error(f"Enum fix migration error: {e}")
     finally:
         raw_conn.close()
 
 
 def init_db():
     """Initialize database tables"""
-    _nuke_enum_table()
+    _fix_enum_issues()
     engine.dispose()
     Base.metadata.create_all(bind=engine)

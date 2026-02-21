@@ -38,48 +38,10 @@ def get_db():
         db.close()
 
 
-def _fix_enum_after_create():
-    """Convert change_maturity from PG enum to VARCHAR AFTER create_all().
-
-    Root cause: Base.metadata.create_all() recreates the changematurity enum
-    type even though the model says Column(String). This happens because
-    SQLAlchemy's metadata somehow retains the enum type registration.
-
-    Solution: Let create_all() do its thing, then immediately convert the
-    column to VARCHAR and drop the orphaned enum type.
-    """
-    raw_conn = engine.raw_connection()
-    try:
-        raw_conn.autocommit = True
-        cursor = raw_conn.cursor()
-
-        # Check if the column is still an enum
-        cursor.execute("""
-            SELECT data_type FROM information_schema.columns
-            WHERE table_name = 'changes' AND column_name = 'change_maturity'
-        """)
-        col = cursor.fetchone()
-
-        if col and col[0] == 'USER-DEFINED':
-            cursor.execute("""
-                ALTER TABLE changes
-                ALTER COLUMN change_maturity TYPE VARCHAR(50)
-                USING change_maturity::text
-            """)
-            cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
-            logger.info("Converted change_maturity from enum to VARCHAR and dropped type")
-        else:
-            logger.info("change_maturity is already VARCHAR — no fix needed")
-
-        cursor.close()
-    except Exception as e:
-        logger.error(f"Post-create enum fix error: {e}")
-    finally:
-        raw_conn.close()
-
-
 def init_db():
-    """Initialize database tables"""
+    """Initialize database tables.
+
+    On AWS, migrate.py handles table creation before gunicorn starts.
+    This is kept as a fallback for local/Replit development.
+    """
     Base.metadata.create_all(bind=engine)
-    _fix_enum_after_create()
-    engine.dispose()

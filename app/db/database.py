@@ -66,18 +66,23 @@ def _fix_enum_issues():
         logger.info(f"Column type: data_type={col[0]}, udt_name={col[1]}")
 
         if col[0] == 'USER-DEFINED':
-            # Column is still enum — convert to VARCHAR in-place
-            logger.info("Converting change_maturity from enum to VARCHAR...")
-            cursor.execute("""
-                ALTER TABLE changes
-                ALTER COLUMN change_maturity TYPE VARCHAR(50)
-                USING change_maturity::text
-            """)
-            logger.info("ALTER COLUMN TYPE: OK")
+            # Column is still enum — archive old data, then drop and recreate clean
+            logger.info("Found enum column — archiving old changes and rebuilding...")
 
-            # Now drop the orphaned enum type
+            # Archive existing rows into a backup table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS changes_archive AS
+                SELECT * FROM changes
+            """)
+            cursor.execute("SELECT COUNT(*) FROM changes_archive")
+            archived = cursor.fetchone()[0]
+            logger.info(f"Archived {archived} rows to changes_archive")
+
+            # Drop the changes table and enum type for a clean slate
+            cursor.execute("DROP TABLE changes CASCADE")
+            logger.info("DROP TABLE changes: OK")
             cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
-            logger.info("DROP TYPE: OK")
+            logger.info("DROP TYPE changematurity: OK")
         else:
             logger.info("Column is already VARCHAR — no migration needed")
 

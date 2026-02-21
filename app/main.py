@@ -53,8 +53,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Start scheduler (DB init handled by migrate.py before gunicorn starts)"""
+    """Initialize DB and start scheduler"""
     logger.info("Starting up...")
+    from app.db.database import init_db
+    init_db()
+    logger.info("Database initialized")
     start_scheduler()
     logger.info("Application started successfully")
 

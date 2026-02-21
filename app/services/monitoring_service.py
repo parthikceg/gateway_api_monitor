@@ -327,6 +327,13 @@ class MonitoringService:
                     logger.warning(f"Missing snapshots for {endpoint_path} comparison")
                     continue
 
+                # Log property counts for debugging
+                source_props = set(source_snapshot.schema_data.get("properties", {}).keys())
+                target_props = set(target_snapshot.schema_data.get("properties", {}).keys())
+                only_in_source = source_props - target_props
+                only_in_target = target_props - source_props
+                logger.info(f"  {endpoint_path}: source({source_tier})={len(source_props)} props, target({target_tier})={len(target_props)} props, only_in_source={only_in_source or 'none'}, only_in_target={only_in_target or 'none'}")
+
                 # Find what's in source but not in target (upcoming features)
                 changes = self.diff_engine.compare_schemas(
                     target_snapshot.schema_data,
@@ -393,11 +400,31 @@ class MonitoringService:
                 logger.error(f"Failed to compare {endpoint_path} ({source_tier} vs {target_tier}): {e}")
                 self.db.rollback()
 
+        # Build diagnostic info about property differences
+        diagnostics = []
+        for endpoint_path in endpoints_to_compare:
+            try:
+                source_snap = self._get_latest_snapshot(source_tier, endpoint_path)
+                target_snap = self._get_latest_snapshot(target_tier, endpoint_path)
+                if source_snap and target_snap:
+                    s_props = set(source_snap.schema_data.get("properties", {}).keys())
+                    t_props = set(target_snap.schema_data.get("properties", {}).keys())
+                    diagnostics.append({
+                        "endpoint": endpoint_path,
+                        "source_props_count": len(s_props),
+                        "target_props_count": len(t_props),
+                        "only_in_source": sorted(s_props - t_props),
+                        "only_in_target": sorted(t_props - s_props),
+                    })
+            except Exception:
+                pass
+
         return {
             "comparison": f"{source_tier}_vs_{target_tier}",
             "upcoming_features_count": len(all_analyzed_changes),
             "changes": all_analyzed_changes,
-            "_change_record_ids": all_change_record_ids
+            "_change_record_ids": all_change_record_ids,
+            "_diagnostics": diagnostics,
         }
 
     def _get_latest_snapshot(self, spec_type: str, endpoint_path: str = "/v1/payment_intents") -> Optional[Snapshot]:

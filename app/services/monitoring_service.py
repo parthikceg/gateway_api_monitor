@@ -299,6 +299,7 @@ class MonitoringService:
 
         all_analyzed_changes = []
         all_change_record_ids = []
+        endpoint_errors = []
         maturity = ChangeMaturity.CROSS_TIER_PREVIEW.value if source_tier == "preview" else ChangeMaturity.CROSS_TIER_BETA.value
 
         # Determine which endpoints to compare
@@ -327,18 +328,12 @@ class MonitoringService:
                     logger.warning(f"Missing snapshots for {endpoint_path} comparison")
                     continue
 
-                # Log property counts for debugging
-                source_props = set(source_snapshot.schema_data.get("properties", {}).keys())
-                target_props = set(target_snapshot.schema_data.get("properties", {}).keys())
-                only_in_source = source_props - target_props
-                only_in_target = target_props - source_props
-                logger.info(f"  {endpoint_path}: source({source_tier})={len(source_props)} props, target({target_tier})={len(target_props)} props, only_in_source={only_in_source or 'none'}, only_in_target={only_in_target or 'none'}")
-
                 # Find what's in source but not in target (upcoming features)
                 changes = self.diff_engine.compare_schemas(
                     target_snapshot.schema_data,
                     source_snapshot.schema_data
                 )
+                logger.info(f"  {endpoint_path}: diff engine found {len(changes)} changes")
 
                 for change_data in changes:
                     change_data["endpoint"] = endpoint_path
@@ -397,7 +392,8 @@ class MonitoringService:
                 logger.info(f"Compared {endpoint_path}: {len(changes)} cross-tier differences")
 
             except Exception as e:
-                logger.error(f"Failed to compare {endpoint_path} ({source_tier} vs {target_tier}): {e}")
+                logger.error(f"Failed to compare {endpoint_path} ({source_tier} vs {target_tier}): {e}", exc_info=True)
+                endpoint_errors.append({"endpoint": endpoint_path, "error": str(e)})
                 self.db.rollback()
 
         # Build diagnostic info about property differences
@@ -425,6 +421,7 @@ class MonitoringService:
             "changes": all_analyzed_changes,
             "_change_record_ids": all_change_record_ids,
             "_diagnostics": diagnostics,
+            "_errors": endpoint_errors,
         }
 
     def _get_latest_snapshot(self, spec_type: str, endpoint_path: str = "/v1/payment_intents") -> Optional[Snapshot]:

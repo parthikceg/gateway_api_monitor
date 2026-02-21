@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 from app.config import get_settings
-from app.db.database import get_db, init_db
+from app.db.database import get_db
 from app.models.models import Snapshot, Change, AlertSubscription, SpecType, ChangeMaturity
 from app.services.monitoring_service import MonitoringService
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
@@ -53,9 +53,8 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database and start scheduler"""
+    """Start scheduler (DB init handled by migrate.py before gunicorn starts)"""
     logger.info("Starting up...")
-    init_db()
     start_scheduler()
     logger.info("Application started successfully")
 

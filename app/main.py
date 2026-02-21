@@ -141,7 +141,7 @@ async def debug_db_info(db: Session = Depends(get_db)):
 
 @app.post("/debug/fix-enum")
 async def fix_enum_manual():
-    """Manually run the enum-to-VARCHAR migration with step-by-step results"""
+    """Manually convert change_maturity from enum to VARCHAR with step-by-step results"""
     from app.db.database import engine
     steps = []
     raw_conn = engine.raw_connection()
@@ -158,68 +158,46 @@ async def fix_enum_manual():
         steps.append({"step": "check_column", "result": f"data_type={col[0]}, udt_name={col[1]}" if col else "no column found"})
 
         if col is None or col[0] != 'USER-DEFINED':
-            steps.append({"step": "skip", "result": "Column is already VARCHAR or table missing — nothing to do"})
+            steps.append({"step": "skip", "result": "Column is already VARCHAR — nothing to do"})
             cursor.close()
             return {"steps": steps, "status": "already_clean"}
 
-        # Step 2: Archive existing rows
+        # Step 2: ALTER COLUMN to convert enum → VARCHAR in-place
         try:
-            cursor.execute("DROP TABLE IF EXISTS changes_archive")
-            steps.append({"step": "drop_old_archive", "result": "OK"})
+            cursor.execute("""
+                ALTER TABLE changes
+                ALTER COLUMN change_maturity TYPE VARCHAR(50)
+                USING change_maturity::text
+            """)
+            steps.append({"step": "alter_column", "result": "OK"})
         except Exception as e:
-            steps.append({"step": "drop_old_archive", "result": f"FAILED: {e}"})
+            steps.append({"step": "alter_column", "result": f"FAILED: {e}"})
 
-        try:
-            cursor.execute("CREATE TABLE changes_archive AS SELECT * FROM changes")
-            cursor.execute("SELECT COUNT(*) FROM changes_archive")
-            count = cursor.fetchone()[0]
-            steps.append({"step": "archive_rows", "result": f"OK — {count} rows archived"})
-        except Exception as e:
-            steps.append({"step": "archive_rows", "result": f"FAILED: {e}"})
-
-        # Step 3: Drop changes table
-        try:
-            cursor.execute("DROP TABLE IF EXISTS changes CASCADE")
-            steps.append({"step": "drop_table", "result": "OK"})
-        except Exception as e:
-            steps.append({"step": "drop_table", "result": f"FAILED: {e}"})
-
-        # Step 4: Drop enum type
+        # Step 3: Drop the orphaned enum type
         try:
             cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
             steps.append({"step": "drop_type", "result": "OK"})
         except Exception as e:
             steps.append({"step": "drop_type", "result": f"FAILED: {e}"})
 
+        # Step 4: Verify
+        cursor.execute("""
+            SELECT data_type, udt_name FROM information_schema.columns
+            WHERE table_name = 'changes' AND column_name = 'change_maturity'
+        """)
+        col2 = cursor.fetchone()
+        steps.append({"step": "verify_column", "result": f"data_type={col2[0]}, udt_name={col2[1]}" if col2 else "column not found"})
+
+        cursor.execute("SELECT typname FROM pg_type WHERE typname = 'changematurity'")
+        enum_check = cursor.fetchone()
+        steps.append({"step": "verify_enum_gone", "result": "enum STILL EXISTS" if enum_check else "enum removed — clean"})
+
+        # Step 5: Check row count preserved
+        cursor.execute("SELECT COUNT(*) FROM changes")
+        steps.append({"step": "row_count", "result": f"{cursor.fetchone()[0]} rows preserved"})
+
         cursor.close()
-
-        # Step 5: Recreate tables with VARCHAR column
-        try:
-            engine.dispose()
-            from app.db.database import Base
-            Base.metadata.create_all(bind=engine)
-            steps.append({"step": "create_tables", "result": "OK"})
-        except Exception as e:
-            steps.append({"step": "create_tables", "result": f"FAILED: {e}"})
-
-        # Step 6: Verify
-        raw_conn2 = engine.raw_connection()
-        try:
-            raw_conn2.autocommit = True
-            cursor2 = raw_conn2.cursor()
-            cursor2.execute("""
-                SELECT data_type, udt_name FROM information_schema.columns
-                WHERE table_name = 'changes' AND column_name = 'change_maturity'
-            """)
-            col2 = cursor2.fetchone()
-            steps.append({"step": "verify", "result": f"data_type={col2[0]}, udt_name={col2[1]}" if col2 else "column not found"})
-            cursor2.execute("SELECT typname FROM pg_type WHERE typname = 'changematurity'")
-            enum_check = cursor2.fetchone()
-            steps.append({"step": "verify_enum_gone", "result": "enum STILL EXISTS" if enum_check else "enum removed — clean"})
-            cursor2.close()
-        finally:
-            raw_conn2.close()
-
+        engine.dispose()
         return {"steps": steps, "status": "completed"}
     except Exception as e:
         steps.append({"step": "unexpected_error", "result": str(e)})

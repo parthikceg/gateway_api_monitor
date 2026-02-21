@@ -39,12 +39,11 @@ def get_db():
 
 
 def _fix_enum_issues():
-    """Fix changematurity enum issues with belt-and-suspenders approach.
+    """Convert change_maturity from PG enum to VARCHAR if needed.
 
-    Strategy:
-    1. If enum exists, first ADD any missing values so queries work immediately
-    2. Then try to DROP TABLE + DROP TYPE for a clean String column
-    3. If DROP fails (permissions, locks, etc.), the added values ensure it works anyway
+    Previous approaches (DROP TABLE, DROP TYPE, ADD VALUE) all failed silently
+    on AWS RDS. This approach uses ALTER COLUMN TYPE to convert in-place,
+    preserving existing data without needing to drop anything.
     """
     logger.info("=== ENUM MIGRATION START ===")
     raw_conn = engine.raw_connection()
@@ -52,64 +51,35 @@ def _fix_enum_issues():
         raw_conn.autocommit = True
         cursor = raw_conn.cursor()
 
-        # Log database info
-        cursor.execute("SELECT current_database(), current_user, version()")
-        row = cursor.fetchone()
-        logger.info(f"DB: {row[0]}, User: {row[1]}, PG: {row[2][:60]}")
+        # Check current column type
+        cursor.execute("""
+            SELECT data_type, udt_name FROM information_schema.columns
+            WHERE table_name = 'changes' AND column_name = 'change_maturity'
+        """)
+        col = cursor.fetchone()
 
-        # Check if the old enum type still exists
-        cursor.execute(
-            "SELECT typname FROM pg_type WHERE typname LIKE '%maturity%'"
-        )
-        matching_types = [r[0] for r in cursor.fetchall()]
-        logger.info(f"Types matching '%%maturity%%': {matching_types}")
+        if col is None:
+            logger.info("No changes table or change_maturity column — clean state")
+            cursor.close()
+            return
 
-        has_enum = 'changematurity' in matching_types
+        logger.info(f"Column type: data_type={col[0]}, udt_name={col[1]}")
 
-        if has_enum:
-            # Log current enum values
+        if col[0] == 'USER-DEFINED':
+            # Column is still enum — convert to VARCHAR in-place
+            logger.info("Converting change_maturity from enum to VARCHAR...")
             cursor.execute("""
-                SELECT e.enumlabel FROM pg_enum e
-                JOIN pg_type t ON e.enumtypid = t.oid
-                WHERE t.typname = 'changematurity'
-                ORDER BY e.enumsortorder
+                ALTER TABLE changes
+                ALTER COLUMN change_maturity TYPE VARCHAR(50)
+                USING change_maturity::text
             """)
-            current_values = [r[0] for r in cursor.fetchall()]
-            logger.info(f"Current enum values: {current_values}")
+            logger.info("ALTER COLUMN TYPE: OK")
 
-            # STEP 1: Add missing values so queries work even if DROP fails
-            logger.info("Adding missing enum values...")
-            required = ['stable_change', 'preview_change', 'beta_change',
-                        'cross_tier_preview', 'cross_tier_beta']
-            for val in required:
-                try:
-                    cursor.execute(
-                        f"ALTER TYPE changematurity ADD VALUE IF NOT EXISTS '{val}'"
-                    )
-                    logger.info(f"  ADD VALUE '{val}': OK")
-                except Exception as e:
-                    logger.info(f"  ADD VALUE '{val}': {e}")
-
-            # Log column type
-            cursor.execute("""
-                SELECT data_type, udt_name FROM information_schema.columns
-                WHERE table_name = 'changes' AND column_name = 'change_maturity'
-            """)
-            col = cursor.fetchone()
-            logger.info(f"Column type: {col}")
-
-            # STEP 2: Try to drop everything for a clean String column
-            try:
-                cursor.execute("DROP TABLE IF EXISTS changes CASCADE")
-                logger.info("DROP TABLE changes: OK")
-                cursor.execute("DROP TABLE IF EXISTS changes_archived_enum CASCADE")
-                logger.info("DROP TABLE changes_archived_enum: OK")
-                cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
-                logger.info("DROP TYPE changematurity: OK")
-            except Exception as drop_err:
-                logger.warning(f"DROP failed: {drop_err}")
+            # Now drop the orphaned enum type
+            cursor.execute("DROP TYPE IF EXISTS changematurity CASCADE")
+            logger.info("DROP TYPE: OK")
         else:
-            logger.info("No changematurity enum found — clean state")
+            logger.info("Column is already VARCHAR — no migration needed")
 
         cursor.close()
         logger.info("=== ENUM MIGRATION END ===")

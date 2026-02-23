@@ -698,8 +698,31 @@ async def subscribe(request: SubscribeRequest, db: Session = Depends(get_db)):
         )
         db.add(subscription)
         db.commit()
-        
+
         logger.info(f"New subscription: {request.email}")
+
+        # Send welcome email with recent changes
+        from app.services.email_service import EmailService
+        email_service = EmailService()
+        if email_service.enabled:
+            recent = db.query(Change).order_by(Change.detected_at.desc()).limit(10).all()
+            recent_changes = [
+                {
+                    "type": c.change_type,
+                    "field": c.field_path,
+                    "endpoint": c.snapshot.endpoint_path if c.snapshot else "N/A",
+                    "severity": c.severity,
+                    "tier": c.snapshot.spec_type.value if c.snapshot else "stable",
+                    "summary": c.ai_summary or ""
+                }
+                for c in recent
+            ]
+            email_service.send_welcome_email(
+                to_email=request.email,
+                to_name=request.name,
+                recent_changes=recent_changes
+            )
+
         return {"status": "success", "message": "Subscribed successfully"}
     except Exception as e:
         logger.error(f"Subscription failed: {e}")

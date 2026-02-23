@@ -161,6 +161,76 @@ We detected {len(changes)} new change{'s' if len(changes) > 1 else ''} in the St
 
         return self.send_email(to_email, subject, html_content, text_content)
 
+    def send_welcome_email(self, to_email: str, to_name: str, recent_changes: List[Dict[str, Any]]) -> bool:
+        """Send welcome email to a new subscriber with a snapshot of recent changes"""
+        subject = "Welcome to Gateway Monitor — You're subscribed to Stripe API alerts"
+
+        if recent_changes:
+            changes_html = ""
+            for change in recent_changes[:10]:
+                severity_color = {
+                    "high": "#dc2626",
+                    "medium": "#f59e0b",
+                    "low": "#3b82f6",
+                    "info": "#6b7280"
+                }.get(change.get("severity", "info"), "#6b7280")
+                tier_label = change.get("tier", "stable").replace("_", " ").title()
+                changes_html += f"""
+                <div style="padding: 14px; margin-bottom: 10px; background-color: #f9fafb; border-radius: 8px; border-left: 4px solid {severity_color};">
+                    <div style="margin-bottom: 6px;">
+                        <span style="background-color: {severity_color}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px; text-transform: uppercase; margin-right: 8px;">{change.get('severity', 'info')}</span>
+                        <strong style="font-size: 14px;">{change.get('type', 'Unknown').replace('_', ' ').title()}</strong>
+                        <span style="color: #6b7280; font-size: 12px; margin-left: 8px;">· {tier_label}</span>
+                    </div>
+                    <code style="background-color: #e5e7eb; padding: 2px 6px; border-radius: 4px; font-size: 12px;">{change.get('field', 'N/A')}</code>
+                    <code style="background-color: #e0e7ff; padding: 2px 6px; border-radius: 4px; font-size: 11px; margin-left: 6px;">{change.get('endpoint', 'N/A')}</code>
+                    <p style="margin: 8px 0 0 0; color: #4b5563; font-size: 13px;">{change.get('summary', '')}</p>
+                </div>
+                """
+            if len(recent_changes) > 10:
+                changes_html += f'<p style="color: #6b7280; font-size: 13px; text-align: center;">...and {len(recent_changes) - 10} more changes on the dashboard.</p>'
+            recent_section = f"<p>Here's a snapshot of the most recent Stripe API changes we're tracking:</p><div style='margin: 20px 0;'>{changes_html}</div>"
+        else:
+            recent_section = "<p>No changes have been detected yet. You'll be the first to know when Stripe updates their API.</p>"
+
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1f2937; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%); padding: 24px; border-radius: 12px 12px 0 0;">
+        <h1 style="color: white; margin: 0; font-size: 24px;">Gateway Monitor</h1>
+        <p style="color: rgba(255,255,255,0.9); margin: 8px 0 0 0;">You're now subscribed to Stripe API alerts</p>
+    </div>
+    <div style="background-color: #ffffff; padding: 24px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 12px 12px;">
+        <p>Hi {to_name},</p>
+        <p>Welcome to <strong>Gateway Monitor</strong>! You'll receive email alerts whenever Stripe's API changes — new fields, removed parameters, updated types, and more across all tiers (Stable, Preview, Beta).</p>
+        <div style="background-color: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: 16px; margin: 20px 0;">
+            <p style="margin: 0; font-size: 14px; color: #0369a1;">
+                <strong>What you'll receive:</strong><br>
+                · <strong>Instant alerts</strong> when new API changes are detected (daily monitoring)<br>
+                · <strong>Weekly digest</strong> every Monday summarising the week's changes
+            </p>
+        </div>
+        {recent_section}
+        <p style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 13px;">
+            You subscribed with this email address. To unsubscribe, reply to this email.
+        </p>
+    </div>
+</body>
+</html>"""
+
+        text_content = f"""Gateway Monitor — Welcome, {to_name}!
+
+You're subscribed to Stripe API change alerts.
+
+What you'll receive:
+- Instant alerts when new API changes are detected
+- Weekly digest every Monday
+
+{'Recent changes:\n' + chr(10).join([f"- [{c.get('severity','info').upper()}] {c.get('type','Unknown')}: {c.get('field','N/A')} ({c.get('endpoint','N/A')}, {c.get('tier','stable')})" for c in recent_changes[:10]]) if recent_changes else 'No changes yet — you will be the first to know!'}
+"""
+        return self.send_email(to_email, subject, html_content, text_content)
+
     def send_weekly_digest(self, to_email: str, to_name: str, changes: List[Dict[str, Any]], week_start: str, week_end: str) -> bool:
         """Send weekly digest email"""
 

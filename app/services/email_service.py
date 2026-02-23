@@ -219,6 +219,15 @@ We detected {len(changes)} new change{'s' if len(changes) > 1 else ''} in the St
 </body>
 </html>"""
 
+        if recent_changes:
+            changes_lines = "\n".join([
+                f"- [{c.get('severity', 'info').upper()}] {c.get('type', 'Unknown')}: {c.get('field', 'N/A')} ({c.get('endpoint', 'N/A')}, {c.get('tier', 'stable')})"
+                for c in recent_changes[:10]
+            ])
+            changes_text = "Recent changes:\n" + changes_lines
+        else:
+            changes_text = "No changes yet — you will be the first to know!"
+
         text_content = f"""Gateway Monitor — Welcome, {to_name}!
 
 You're subscribed to Stripe API change alerts.
@@ -227,7 +236,7 @@ What you'll receive:
 - Instant alerts when new API changes are detected
 - Weekly digest every Monday
 
-{'Recent changes:\n' + chr(10).join([f"- [{c.get('severity','info').upper()}] {c.get('type','Unknown')}: {c.get('field','N/A')} ({c.get('endpoint','N/A')}, {c.get('tier','stable')})" for c in recent_changes[:10]]) if recent_changes else 'No changes yet — you will be the first to know!'}
+{changes_text}
 """
         return self.send_email(to_email, subject, html_content, text_content)
 

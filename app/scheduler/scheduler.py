@@ -2,7 +2,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from app.config import get_settings
@@ -101,13 +101,14 @@ async def weekly_digest_job():
 
 def start_scheduler():
     """Start the scheduler"""
-    # Daily monitoring job
+    # Daily monitoring job — runs immediately on startup, then every 24 hours
     scheduler.add_job(
         scheduled_monitoring_job,
         trigger=IntervalTrigger(hours=settings.crawl_schedule_hours),
         id="monitoring_job",
         name="Monitor Stripe API changes",
-        replace_existing=True
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc)  # Fire immediately on startup
     )
 
     # Weekly digest job (default: Monday 9 AM)
